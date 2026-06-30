@@ -5,8 +5,6 @@ class SeatBase(BaseModel):
     number: int = Field(gt=0)
     price: int = Field(ge=0)
 
-class SeatCreate(SeatBase):
-    event_id: int = Field(gt=0)
 
 class SeatResponse(SeatBase):
     id: int
