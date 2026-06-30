@@ -18,3 +18,10 @@ class EventResponse(EventBase):
     organizer_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EventUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=128)
+    venue: str | None = Field(default=None, max_length=128)
+    date: datetime | None = None
+    description: str | None = Field(default=None, max_length=1024)

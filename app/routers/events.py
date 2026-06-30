@@ -1,10 +1,11 @@
-from app.core.deps import CurrentUser, require_role, db_dep
-from fastapi import APIRouter, Query, status, HTTPException
+from app.core.deps import require_role, db_dep
+from fastapi import APIRouter, Query, status, HTTPException, Depends
 from sqlalchemy import select, exists
 from app.models.event import Event
 from app.models.seat import Seat
+from app.models.user import User
 from datetime import datetime, timezone
-from app.schemas.event import EventResponse
+from app.schemas.event import EventResponse, EventCreate, EventUpdate
 from app.schemas.seat import SeatResponse
 from typing import Annotated, Literal
 
@@ -50,6 +51,7 @@ async def get_event_by_id(db: db_dep, event_id: int):
 
     return event
 
+
 @router.get("/{event_id}/seats", response_model=list[SeatResponse])
 async def get_event_seats(db: db_dep, event_id: int):
     event_exists = await db.scalar(
@@ -72,6 +74,50 @@ async def get_event_seats(db: db_dep, event_id: int):
     return result.scalars().all()
 
 
+@router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
+async def create_event(
+        db: db_dep,
+        new_event: EventCreate,
+        current_user: Annotated[User, Depends(require_role("organizer"))]):
+    event = Event(**new_event.model_dump(),
+                  organizer_id=current_user.id)
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    return event
 
 
+@router.patch("/{event_id}", response_model=EventResponse)
+async def update_event(
+    event_id: int,
+    db: db_dep,
+    event_data: EventUpdate,
+    current_user: Annotated[
+        User,
+        Depends(require_role("organizer")),
+    ],
+):
+    stmt = select(Event).where(Event.id == event_id)
+    event = await db.scalar(stmt)
 
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found",
+        )
+
+    if event.organizer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You cannot update this event",
+        )
+
+    updates = event_data.model_dump(exclude_unset=True)
+
+    for field, value in updates.items():
+        setattr(event, field, value)
+
+    await db.commit()
+    await db.refresh(event)
+
+    return event
