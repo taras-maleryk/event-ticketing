@@ -7,7 +7,9 @@ from app.models.user import User
 from datetime import datetime, timezone
 from app.schemas.event import EventResponse, EventCreate, EventUpdate
 from app.schemas.seat import SeatResponse
+from app.schemas.hall import HallConfigurationCreate
 from typing import Annotated, Literal
+from sqlalchemy.exc import IntegrityError
 
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -121,3 +123,92 @@ async def update_event(
     await db.refresh(event)
 
     return event
+
+
+@router.post(
+    "/{event_id}/seats",
+    response_model=list[SeatResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_event_seats(
+    event_id: int,
+    hall_config: HallConfigurationCreate,
+    db: db_dep,
+    current_user: Annotated[
+        User,
+        Depends(require_role("organizer")),
+    ],
+):
+    event = await db.scalar(
+        select(Event).where(Event.id == event_id)
+    )
+
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found",
+        )
+
+    if event.organizer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You cannot manage seats for this event",
+        )
+
+    seats_exist = await db.scalar(
+        select(exists().where(Seat.event_id == event_id))
+    )
+
+    if seats_exist:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Seats have already been created for this event",
+        )
+
+    prices_by_row = {
+        item.row: item.price
+        for item in hall_config.row_prices
+    }
+
+    excluded_by_row = {
+        item.row: set(item.excluded_numbers)
+        for item in hall_config.excluded_seats
+    }
+
+    seats = []
+
+    for row in range(1, hall_config.total_rows + 1):
+        excluded_numbers = excluded_by_row.get(row, set())
+
+        for number in range(1, hall_config.seats_per_row + 1):
+            if number in excluded_numbers:
+                continue
+
+            seats.append(
+                Seat(
+                    event_id=event_id,
+                    row=row,
+                    number=number,
+                    price=prices_by_row[row],
+                )
+            )
+
+    db.add_all(seats)
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Seat layout conflicts with existing seats",
+        ) from exc
+
+    result = await db.execute(
+        select(Seat)
+        .where(Seat.event_id == event_id)
+        .order_by(Seat.row.asc(), Seat.number.asc())
+    )
+
+    return result.scalars().all()
