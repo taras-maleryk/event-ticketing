@@ -6,7 +6,7 @@ from datetime import datetime
 class Hold(Base):
     __tablename__ = "holds"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     seat_id: Mapped[int] = mapped_column(ForeignKey("seats.id"), nullable=False)
 
