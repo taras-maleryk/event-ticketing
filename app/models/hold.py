@@ -1,7 +1,8 @@
 from app.db.session import Base
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, ForeignKey, DateTime, func
+from sqlalchemy import ForeignKey, DateTime, func
 from datetime import datetime
+from sqlalchemy.dialects.postgresql import ExcludeConstraint
 
 class Hold(Base):
     __tablename__ = "holds"
@@ -17,5 +18,19 @@ class Hold(Base):
     )
 
     held_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[str] = mapped_column(String(50), nullable=False)
-    payment_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        ExcludeConstraint(
+            ("seat_id", "="),
+            (
+                func.tstzrange(
+                    held_from,
+                    held_until,
+                    "[)",
+                ),
+                "&&",
+            ),
+            using="gist",
+            name="excl_holds_seat_time_overlap",
+        ),
+    )
