@@ -3,11 +3,11 @@ from app.core.deps import db_dep, CurrentUser
 from app.models.seat import Seat
 from app.models.hold import Hold
 from app.schemas.hold import HoldResponse
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
 from app.core.config import settings
 from sqlalchemy.exc import IntegrityError
-
+from app.models.booking import Booking
 
 router = APIRouter(prefix="/seats", tags=["seats"])
 
@@ -29,6 +29,16 @@ async def hold_seat(
             detail="Seat not found"
         )
 
+    booking_id = await db.scalar(
+        select(Booking.id).where(Booking.seat_id == seat_id)
+    )
+
+    if booking_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Seat is already booked",
+        )
+
     hold = Hold(
         user_id=current_user.id,
         seat_id=seat_id,
@@ -36,13 +46,30 @@ async def hold_seat(
     )
 
     db.add(hold)
+
     try:
-        await db.commit()
+        await db.flush()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="Seat is already held") from exc
 
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Seat is already held",
+        ) from exc
+
+    booking_id = await db.scalar(
+        select(Booking.id).where(Booking.seat_id == seat_id)
+    )
+
+    if booking_id is not None:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Seat is already booked",
+        )
+
+    await db.commit()
     await db.refresh(hold)
 
     return hold
@@ -69,6 +96,7 @@ async def release_hold(
         )
         .order_by(Hold.held_until.desc())
         .limit(1)
+        .with_for_update()
     )
     hold = await db.scalar(stmt)
 
