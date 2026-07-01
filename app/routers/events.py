@@ -17,10 +17,10 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 @router.get("", response_model=list[EventResponse])
 async def get_events(
-        db: db_dep,
-        limit: Annotated[int, Query(default=10, ge=1, le=20)],
-        offset: Annotated[int, Query(default=0, ge=0)],
-        event_status: Literal["upcoming", "past"]
+    db: db_dep,
+    limit: Annotated[int, Query(ge=1, le=20)] = 10,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    event_status: Literal["upcoming", "past"] = "upcoming",
 ):
     now = datetime.now(timezone.utc)
 
