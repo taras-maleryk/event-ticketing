@@ -1,16 +1,17 @@
-from app.core.deps import require_role, db_dep
+from app.core.deps import require_role, db_dep, CurrentUser
+from app.models import Hold, Booking
 from fastapi import APIRouter, Query, status, HTTPException, Depends
-from sqlalchemy import select, exists
+from sqlalchemy import select, exists, and_, func
 from app.models.event import Event
 from app.models.seat import Seat
 from app.models.user import User
 from datetime import datetime, timezone
 from app.schemas.event import EventResponse, EventCreate, EventUpdate
-from app.schemas.seat import SeatResponse
+from app.schemas.seat import SeatResponse, SeatAvailabilityResponse
 from app.schemas.hall import HallConfigurationCreate
 from typing import Annotated, Literal
 from sqlalchemy.exc import IntegrityError
-
+from app.enums.seat_status import SeatStatus
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -54,8 +55,8 @@ async def get_event_by_id(db: db_dep, event_id: int):
     return event
 
 
-@router.get("/{event_id}/seats", response_model=list[SeatResponse])
-async def get_event_seats(db: db_dep, event_id: int):
+@router.get("/{event_id}/seats", response_model=list[SeatAvailabilityResponse])
+async def get_event_seats(db: db_dep, event_id: int, current_user: CurrentUser):
     event_exists = await db.scalar(
         select(exists().where(Event.id == event_id))
     )
@@ -67,13 +68,59 @@ async def get_event_seats(db: db_dep, event_id: int):
         )
 
     stmt = (
-        select(Seat)
+        select(
+            Seat,
+            Hold.user_id.label("hold_user_id"),
+            Booking.user_id.label("booking_user_id"),
+        )
+        .outerjoin(
+            Hold,
+            and_(
+                Hold.seat_id == Seat.id,
+                Hold.held_until > func.now(),
+            ),
+        )
+        .outerjoin(
+            Booking,
+            Booking.seat_id == Seat.id,
+        )
         .where(Seat.event_id == event_id)
         .order_by(Seat.row.asc(), Seat.number.asc())
     )
 
     result = await db.execute(stmt)
-    return result.scalars().all()
+    rows = result.all()
+
+    response: list[SeatAvailabilityResponse] = []
+
+    for seat, hold_user_id, booking_user_id in rows:
+        if booking_user_id is not None:
+            if booking_user_id == current_user.id:
+                seat_status = SeatStatus.BOOKED_BY_ME
+            else:
+                seat_status = SeatStatus.BOOKED
+
+        elif hold_user_id is not None:
+            if hold_user_id == current_user.id:
+                seat_status = SeatStatus.HELD_BY_ME
+            else:
+                seat_status = SeatStatus.HELD
+
+        else:
+            seat_status = SeatStatus.AVAILABLE
+
+        response.append(
+            SeatAvailabilityResponse(
+                id=seat.id,
+                event_id=seat.event_id,
+                row=seat.row,
+                number=seat.number,
+                price=seat.price,
+                status=seat_status,
+            )
+        )
+
+    return response
 
 
 @router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
