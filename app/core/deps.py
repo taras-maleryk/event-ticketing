@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from app.core.security import decode_token
 from app.schemas.token import TokenData
 from app.models.user import User
-from app.db.session import get_db
+from app.db.async_session import get_db
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
