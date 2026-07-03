@@ -3,10 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 from typing import AsyncGenerator
 
-engine = create_async_engine(settings.DATABASE_URL, echo=settings.DB_ECHO)
+async_engine = create_async_engine(settings.DATABASE_URL, echo=settings.DB_ECHO)
 
 async_session_maker = async_sessionmaker(
-    bind=engine,
+    bind=async_engine,
     expire_on_commit=False
 )
 

@@ -1,4 +1,4 @@
-from app.db.session import Base
+from app.db.async_session import Base
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, ForeignKey, DateTime
 from datetime import datetime
