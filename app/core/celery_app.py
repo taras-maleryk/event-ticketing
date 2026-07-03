@@ -5,6 +5,9 @@ from app.core.config import settings
 celery_app = Celery(
     "event_ticketing",
     broker=settings.REDIS_URL,
+    include=[
+        "app.tasks.holds"
+    ]
 )
 
 celery_app.conf.update(
