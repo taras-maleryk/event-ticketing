@@ -1,6 +1,7 @@
 from celery import Celery
 
 from app.core.config import settings
+from celery.schedules import crontab
 
 celery_app = Celery(
     "event_ticketing",
@@ -15,5 +16,12 @@ celery_app.conf.update(
     accept_content=["json"],
     task_ignore_result=True,
     timezone="UTC",
-    enamte_utc=True,
+    enable_utc=True,
 )
+
+celery_app.conf.beat_schedule = {
+    "cleanup-old-holds-daily": {
+        "task": "app.tasks.holds.cleanup_old_holds",
+        "schedule": crontab(hour=3, minute=0),
+    },
+}
