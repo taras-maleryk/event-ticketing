@@ -151,3 +151,96 @@ async def test_login_with_incorrect_password_returns_401(
     assert login_response.headers["WWW-Authenticate"] == "Bearer"
     assert "access_token" not in login_response.cookies
     assert "refresh_token" not in login_response.cookies
+
+
+async def test_refresh_token_successfully(
+    client: AsyncClient,
+) -> None:
+    register_payload = {
+        "name": "Tom Norris",
+        "email": "tom@example.com",
+        "password": "StrongPass123",
+        "confirm_password": "StrongPass123",
+    }
+
+    register_response = await client.post(
+        "/api/auth/register",
+        json=register_payload,
+    )
+
+    assert register_response.status_code == 201
+
+    login_payload = {
+        "username": "tom@example.com",
+        "password": "StrongPass123",
+    }
+
+    login_response = await client.post(
+        "/api/auth/login",
+        data=login_payload,
+    )
+
+    assert login_response.status_code == 200
+    assert "refresh_token" in login_response.cookies
+
+    refresh_response = await client.post("/api/auth/refresh")
+
+    assert refresh_response.status_code == 200
+
+    refresh_data = refresh_response.json()
+
+    assert refresh_data["access_token"] is not None
+    assert refresh_data["token_type"] == "bearer"
+    assert "access_token" in refresh_response.cookies
+
+
+async def test_refresh_token_without_cookie_returns_401(
+    client: AsyncClient,
+) -> None:
+    refresh_response = await client.post("/api/auth/refresh")
+
+    refresh_data = refresh_response.json()
+
+    assert refresh_response.status_code == 401
+    assert refresh_data["detail"] == "Refresh token missing"
+
+
+async def test_logout_successfully(
+    client: AsyncClient,
+) -> None:
+    register_payload = {
+        "name": "Tom Norris",
+        "email": "tom@example.com",
+        "password": "StrongPass123",
+        "confirm_password": "StrongPass123",
+    }
+
+    register_response = await client.post(
+        "/api/auth/register",
+        json=register_payload,
+    )
+
+    assert register_response.status_code == 201
+
+    login_payload = {
+        "username": "tom@example.com",
+        "password": "StrongPass123",
+    }
+
+    login_response = await client.post(
+        "/api/auth/login",
+        data=login_payload,
+    )
+
+    assert login_response.status_code == 200
+    assert "access_token" in client.cookies
+    assert "refresh_token" in client.cookies
+
+    logout_response = await client.post("/api/auth/logout")
+
+    logout_data = logout_response.json()
+
+    assert logout_response.status_code == 200
+    assert logout_data["detail"] == "Successfully logged out"
+    assert "access_token" not in client.cookies
+    assert "refresh_token" not in client.cookies
