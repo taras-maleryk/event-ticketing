@@ -4,6 +4,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "EventTicketingAPI"
     DATABASE_URL: str
     SYNC_DATABASE_URL: str
+    TEST_DATABASE_URL: str | None = None
     REDIS_URL: str
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
