@@ -208,3 +208,128 @@ async def test_list_events_with_past_status_returns_past_events(
     assert response.status_code == 200
     assert len(response_data) == 1
     assert response_data[0]["name"] == "Past Event"
+
+
+async def test_update_own_event_as_organizer_returns_200(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Original Event",
+            venue="Original Venue",
+            description="Original Description",
+        ),
+    )
+
+    update_payload = {
+        "name": "Updated Event",
+        "description": "Updated Description",
+    }
+
+    response = await client.patch(
+        f"/api/events/{created_event['id']}",
+        json=update_payload,
+        headers=organizer_headers,
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert response_data["id"] == created_event["id"]
+    assert response_data["name"] == "Updated Event"
+    assert response_data["venue"] == "Original Venue"
+    assert response_data["description"] == "Updated Description"
+    assert response_data["organizer_id"] == created_event["organizer_id"]
+    assert "date" in response_data
+
+    updated_event = await db_session.scalar(
+        select(Event).where(Event.id == created_event["id"])
+    )
+
+    assert updated_event is not None
+    assert updated_event.name == "Updated Event"
+    assert updated_event.venue == "Original Venue"
+    assert updated_event.description == "Updated Description"
+    assert updated_event.organizer_id == created_event["organizer_id"]
+
+
+async def test_update_missing_event_as_organizer_returns_404(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    response = await client.patch(
+        "/api/events/999",
+        json={"name": "Updated Event"},
+        headers=organizer_headers,
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 404
+    assert response_data["detail"] == "Event not found"
+
+
+async def test_update_event_as_regular_user_returns_403(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(name="Owner Event"),
+    )
+
+    response = await client.patch(
+        f"/api/events/{created_event['id']}",
+        json={"name": "Updated By Regular User"},
+        headers=regular_user_headers,
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 403
+    assert response_data["detail"] == "Not enough permissions"
+
+    event_after_failed_update = await db_session.scalar(
+        select(Event).where(Event.id == created_event["id"])
+    )
+
+    assert event_after_failed_update is not None
+    assert event_after_failed_update.name == "Owner Event"
+
+
+async def test_update_another_organizers_event_returns_403(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    another_organizer_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(name="Owner Event"),
+    )
+
+    response = await client.patch(
+        f"/api/events/{created_event['id']}",
+        json={"name": "Updated By Another Organizer"},
+        headers=another_organizer_headers,
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 403
+    assert response_data["detail"] == "You cannot update this event"
+
+    event_after_failed_update = await db_session.scalar(
+        select(Event).where(Event.id == created_event["id"])
+    )
+
+    assert event_after_failed_update is not None
+    assert event_after_failed_update.name == "Owner Event"
