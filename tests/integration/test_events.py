@@ -2,7 +2,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.event import Event
-from tests.helpers import make_event_payload, create_event_as_organizer
+from tests.utils.events import make_event_payload, create_event_as_organizer
 
 
 async def test_create_event_without_auth_returns_401(client: AsyncClient) -> None:
