@@ -2,7 +2,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import (
 from app.core.config import settings
 from app.db.async_session import get_db
 from app.main import app
-
+from app.models.user import User
 
 if settings.TEST_DATABASE_URL is None:
     raise RuntimeError(
@@ -129,3 +129,18 @@ async def regular_user_client(client: AsyncClient) -> AsyncClient:
     assert "access_token" in client.cookies
 
     return client
+
+
+@pytest.fixture
+async def organizer_client(
+    regular_user_client: AsyncClient,
+    db_session: AsyncSession,
+) -> AsyncClient:
+    await db_session.execute(
+        update(User)
+        .where(User.email == "regular@example.com")
+        .values(role="organizer")
+    )
+    await db_session.commit()
+
+    return regular_user_client
