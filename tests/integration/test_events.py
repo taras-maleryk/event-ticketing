@@ -4,17 +4,46 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.event import Event
 
-async def test_create_event_without_auth_401(client: AsyncClient) -> None:
-    payload = {
-        "name": "SomeEvent",
-        "venue": "SomeVenue",
-        "date": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-        "description": "SomeDescription",
+def make_event_payload(
+    *,
+    name: str = "SomeEvent",
+    venue: str = "SomeVenue",
+    days_from_now: int = 1,
+    description: str = "SomeDescription",
+) -> dict[str, str]:
+    return {
+        "name": name,
+        "venue": venue,
+        "date": (
+            datetime.now(timezone.utc) + timedelta(days=days_from_now)
+        ).isoformat(),
+        "description": description,
     }
+
+
+async def create_event_as_organizer(
+    organizer_client: AsyncClient,
+    payload: dict[str, str] | None = None,
+) -> dict:
+    event_payload = payload or make_event_payload()
+
+    response = await organizer_client.post(
+        "/api/events",
+        json=event_payload,
+    )
+
+    assert response.status_code == 201
+
+    return response.json()
+
+
+async def test_create_event_without_auth_returns_401(client: AsyncClient) -> None:
+    payload = make_event_payload()
 
     response = await client.post(
         "/api/events",
-        json=payload)
+        json=payload,
+    )
 
     data = response.json()
 
@@ -26,12 +55,7 @@ async def test_create_event_without_auth_401(client: AsyncClient) -> None:
 async def test_create_event_as_regular_user_returns_403(
     regular_user_client: AsyncClient,
 ) -> None:
-    event_payload = {
-        "name": "SomeEvent",
-        "venue": "SomeVenue",
-        "date": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-        "description": "SomeDescription",
-    }
+    event_payload = make_event_payload()
 
     event_response = await regular_user_client.post(
         "/api/events",
@@ -48,21 +72,9 @@ async def test_create_event_as_organizer_returns_201(
     organizer_client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    event_payload = {
-        "name": "SomeEvent",
-        "venue": "SomeVenue",
-        "date": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-        "description": "SomeDescription",
-    }
 
-    event_response = await organizer_client.post(
-        "/api/events",
-        json=event_payload,
-    )
+    response_data = await create_event_as_organizer(organizer_client)
 
-    response_data = event_response.json()
-
-    assert event_response.status_code == 201
     assert response_data["id"] == 1
     assert response_data["name"] == "SomeEvent"
     assert response_data["venue"] == "SomeVenue"
@@ -79,3 +91,107 @@ async def test_create_event_as_organizer_returns_201(
     assert created_event.venue == "SomeVenue"
     assert created_event.description == "SomeDescription"
     assert created_event.organizer_id == response_data["organizer_id"]
+
+
+async def test_get_event_by_id_returns_event(
+    organizer_client: AsyncClient,
+) -> None:
+    event_payload = make_event_payload(
+        name="Future Event",
+        venue="Main Hall",
+        days_from_now=1,
+        description="Future event description",
+    )
+
+    created_event = await create_event_as_organizer(
+        organizer_client,
+        event_payload,
+    )
+
+    response = await organizer_client.get(
+        f"/api/events/{created_event['id']}"
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert response_data["id"] == created_event["id"]
+    assert response_data["name"] == "Future Event"
+    assert response_data["venue"] == "Main Hall"
+    assert response_data["description"] == "Future event description"
+    assert response_data["organizer_id"] == created_event["organizer_id"]
+    assert "date" in response_data
+
+
+async def test_get_missing_event_returns_404(
+    client: AsyncClient,
+) -> None:
+    response = await client.get("/api/events/999")
+
+    response_data = response.json()
+
+    assert response.status_code == 404
+    assert response_data["detail"] == "Event not found"
+
+
+async def test_list_events_returns_upcoming_events_by_default(
+    organizer_client: AsyncClient,
+) -> None:
+    future_payload = make_event_payload(
+        name="Future Event",
+        days_from_now=1,
+    )
+    past_payload = make_event_payload(
+        name="Past Event",
+        days_from_now=-1,
+    )
+
+    await create_event_as_organizer(
+        organizer_client,
+        future_payload,
+    )
+    await create_event_as_organizer(
+        organizer_client,
+        past_payload,
+    )
+
+    response = await organizer_client.get("/api/events")
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert len(response_data) == 1
+    assert response_data[0]["name"] == "Future Event"
+
+
+async def test_list_events_with_past_status_returns_past_events(
+    organizer_client: AsyncClient,
+) -> None:
+    future_payload = make_event_payload(
+        name="Future Event",
+        days_from_now=1,
+    )
+    past_payload = make_event_payload(
+        name="Past Event",
+        days_from_now=-1,
+    )
+
+    await create_event_as_organizer(
+        organizer_client,
+        future_payload,
+    )
+    await create_event_as_organizer(
+        organizer_client,
+        past_payload,
+    )
+
+    response = await organizer_client.get(
+        "/api/events",
+        params={"event_status": "past"},
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert len(response_data) == 1
+    assert response_data[0]["name"] == "Past Event"
