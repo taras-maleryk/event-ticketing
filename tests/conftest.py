@@ -141,6 +141,18 @@ async def regular_user_headers(
 
 
 @pytest.fixture
+async def another_regular_user_headers(
+    db_session: AsyncSession,
+) -> dict[str, str]:
+    return await create_auth_headers_for_user(
+        db_session,
+        name="Another Regular User",
+        email="another-regular@example.com",
+        role="user",
+    )
+
+
+@pytest.fixture
 async def organizer_headers(
     db_session: AsyncSession,
 ) -> dict[str, str]:
