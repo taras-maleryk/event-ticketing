@@ -22,14 +22,16 @@ def make_event_payload(
 
 
 async def create_event_as_organizer(
-    organizer_client: AsyncClient,
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
     payload: dict[str, str] | None = None,
 ) -> dict:
     event_payload = payload or make_event_payload()
 
-    response = await organizer_client.post(
+    response = await client.post(
         "/api/events",
         json=event_payload,
+        headers=organizer_headers,
     )
 
     assert response.status_code == 201
@@ -53,13 +55,13 @@ async def test_create_event_without_auth_returns_401(client: AsyncClient) -> Non
 
 
 async def test_create_event_as_regular_user_returns_403(
-    regular_user_client: AsyncClient,
+    client: AsyncClient,
+    regular_user_headers: dict[str, str],
 ) -> None:
-    event_payload = make_event_payload()
-
-    event_response = await regular_user_client.post(
+    event_response = await client.post(
         "/api/events",
-        json=event_payload,
+        json=make_event_payload(),
+        headers=regular_user_headers,
     )
 
     response_data = event_response.json()
@@ -69,11 +71,14 @@ async def test_create_event_as_regular_user_returns_403(
 
 
 async def test_create_event_as_organizer_returns_201(
-    organizer_client: AsyncClient,
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
     db_session: AsyncSession,
 ) -> None:
-
-    response_data = await create_event_as_organizer(organizer_client)
+    response_data = await create_event_as_organizer(
+        client,
+        organizer_headers,
+    )
 
     assert response_data["id"] == 1
     assert response_data["name"] == "SomeEvent"
@@ -94,7 +99,8 @@ async def test_create_event_as_organizer_returns_201(
 
 
 async def test_get_event_by_id_returns_event(
-    organizer_client: AsyncClient,
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
 ) -> None:
     event_payload = make_event_payload(
         name="Future Event",
@@ -104,11 +110,12 @@ async def test_get_event_by_id_returns_event(
     )
 
     created_event = await create_event_as_organizer(
-        organizer_client,
+        client,
+        organizer_headers,
         event_payload,
     )
 
-    response = await organizer_client.get(
+    response = await client.get(
         f"/api/events/{created_event['id']}"
     )
 
@@ -135,7 +142,8 @@ async def test_get_missing_event_returns_404(
 
 
 async def test_list_events_returns_upcoming_events_by_default(
-    organizer_client: AsyncClient,
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
 ) -> None:
     future_payload = make_event_payload(
         name="Future Event",
@@ -147,15 +155,17 @@ async def test_list_events_returns_upcoming_events_by_default(
     )
 
     await create_event_as_organizer(
-        organizer_client,
+        client,
+        organizer_headers,
         future_payload,
     )
     await create_event_as_organizer(
-        organizer_client,
+        client,
+        organizer_headers,
         past_payload,
     )
 
-    response = await organizer_client.get("/api/events")
+    response = await client.get("/api/events")
 
     response_data = response.json()
 
@@ -165,7 +175,8 @@ async def test_list_events_returns_upcoming_events_by_default(
 
 
 async def test_list_events_with_past_status_returns_past_events(
-    organizer_client: AsyncClient,
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
 ) -> None:
     future_payload = make_event_payload(
         name="Future Event",
@@ -177,15 +188,17 @@ async def test_list_events_with_past_status_returns_past_events(
     )
 
     await create_event_as_organizer(
-        organizer_client,
+        client,
+        organizer_headers,
         future_payload,
     )
     await create_event_as_organizer(
-        organizer_client,
+        client,
+        organizer_headers,
         past_payload,
     )
 
-    response = await organizer_client.get(
+    response = await client.get(
         "/api/events",
         params={"event_status": "past"},
     )
