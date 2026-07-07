@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import (
 from app.core.config import settings
 from app.db.async_session import get_db
 from app.main import app
+from app.models.user import User
+from app.core.security import create_access_token, get_password_hash
 
 
 if settings.TEST_DATABASE_URL is None:
@@ -97,3 +99,66 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+async def create_auth_headers_for_user(
+    db_session: AsyncSession,
+    *,
+    name: str,
+    email: str,
+    role: str,
+) -> dict[str, str]:
+    user = User(
+        name=name,
+        email=email,
+        hashed_password=get_password_hash("StrongPass123"),
+        role=role,
+    )
+
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    access_token = create_access_token(
+        data={"sub": str(user.id)}
+    )
+
+    return {
+        "Authorization": f"Bearer {access_token}",
+    }
+
+
+@pytest.fixture
+async def regular_user_headers(
+    db_session: AsyncSession,
+) -> dict[str, str]:
+    return await create_auth_headers_for_user(
+        db_session,
+        name="Regular User",
+        email="regular@example.com",
+        role="user",
+    )
+
+
+@pytest.fixture
+async def organizer_headers(
+    db_session: AsyncSession,
+) -> dict[str, str]:
+    return await create_auth_headers_for_user(
+        db_session,
+        name="Organizer User",
+        email="organizer@example.com",
+        role="organizer",
+    )
+
+
+@pytest.fixture
+async def another_organizer_headers(
+    db_session: AsyncSession,
+) -> dict[str, str]:
+    return await create_auth_headers_for_user(
+        db_session,
+        name="Another Organizer",
+        email="another-organizer@example.com",
+        role="organizer",
+    )
