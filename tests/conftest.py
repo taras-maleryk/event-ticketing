@@ -97,3 +97,35 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def regular_user_client(client: AsyncClient) -> AsyncClient:
+    register_payload = {
+        "name": "Regular User",
+        "email": "regular@example.com",
+        "password": "StrongPass123",
+        "confirm_password": "StrongPass123",
+    }
+
+    register_response = await client.post(
+        "/api/auth/register",
+        json=register_payload,
+    )
+
+    assert register_response.status_code == 201
+
+    login_payload = {
+        "username": "regular@example.com",
+        "password": "StrongPass123",
+    }
+
+    login_response = await client.post(
+        "/api/auth/login",
+        data=login_payload,
+    )
+
+    assert login_response.status_code == 200
+    assert "access_token" in client.cookies
+
+    return client
