@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-
+from app.core.security import create_access_token, create_refresh_token
 
 async def test_register_user_successfully(
     client: AsyncClient,
@@ -244,3 +244,57 @@ async def test_logout_successfully(
     assert logout_data["detail"] == "Successfully logged out"
     assert "access_token" not in client.cookies
     assert "refresh_token" not in client.cookies
+
+
+async def test_refresh_with_invalid_token_returns_401(
+    client: AsyncClient,
+) -> None:
+    client.cookies.set(
+        "refresh_token",
+        "not-a-valid-token",
+    )
+
+    response = await client.post("/api/auth/refresh")
+
+    response_data = response.json()
+
+    assert response.status_code == 401
+    assert response_data["detail"] == "Invalid or expired refresh token"
+
+
+async def test_refresh_with_access_token_returns_401(
+    client: AsyncClient,
+) -> None:
+    access_token = create_access_token(
+        data={"sub": "1"}
+    )
+
+    client.cookies.set(
+        "refresh_token",
+        access_token,
+    )
+
+    response = await client.post("/api/auth/refresh")
+
+    response_data = response.json()
+
+    assert response.status_code == 401
+    assert response_data["detail"] == "Invalid or expired refresh token"
+
+
+async def test_refresh_token_without_sub_returns_401(
+    client: AsyncClient,
+) -> None:
+    refresh_token = create_refresh_token(data={})
+
+    client.cookies.set(
+        "refresh_token",
+        refresh_token,
+    )
+
+    response = await client.post("/api/auth/refresh")
+
+    response_data = response.json()
+
+    assert response.status_code == 401
+    assert response_data["detail"] == "Invalid token claims"
