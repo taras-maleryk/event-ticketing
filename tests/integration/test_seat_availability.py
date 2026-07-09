@@ -1,6 +1,12 @@
+from datetime import datetime, timedelta, timezone
+
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums.seat_status import SeatStatus
+from app.models.hold import Hold
+from app.models.user import User
 from tests.utils.bookings import create_booking_for_hold
 from tests.utils.holds import create_hold_for_seat
 from tests.utils.seats import create_event_with_seats
@@ -146,3 +152,51 @@ async def test_get_event_seats_returns_booked_statuses(
 
     assert booked_seat_for_owner["status"] == SeatStatus.BOOKED_BY_ME.value
     assert available_seat_for_owner["status"] == SeatStatus.AVAILABLE.value
+
+
+async def test_get_event_seats_ignores_expired_holds(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    created_event, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    seat_id = created_seats[0]["id"]
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert user is not None
+
+    now = datetime.now(timezone.utc)
+
+    expired_hold = Hold(
+        seat_id=seat_id,
+        user_id=user.id,
+        held_from=now - timedelta(minutes=30),
+        held_until=now - timedelta(minutes=1),
+    )
+
+    db_session.add(expired_hold)
+    await db_session.commit()
+
+    response = await client.get(
+        f"/api/events/{created_event['id']}/seats",
+        headers=regular_user_headers,
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+
+    seat = find_seat_by_id(
+        response_data,
+        seat_id,
+    )
+
+    assert seat["status"] == SeatStatus.AVAILABLE.value
