@@ -2,7 +2,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.event import Event
-from tests.utils.events import make_event_payload, create_event_as_organizer
+from tests.utils.events import create_event_as_organizer, make_event_payload
 
 
 async def test_create_event_without_auth_returns_401(client: AsyncClient) -> None:
@@ -136,8 +136,12 @@ async def test_list_events_returns_upcoming_events_by_default(
     response_data = response.json()
 
     assert response.status_code == 200
-    assert len(response_data) == 1
-    assert response_data[0]["name"] == "Future Event"
+    assert response_data["page"] == 1
+    assert response_data["page_size"] == 10
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Future Event"
 
 
 async def test_list_events_with_past_status_returns_past_events(
@@ -172,8 +176,66 @@ async def test_list_events_with_past_status_returns_past_events(
     response_data = response.json()
 
     assert response.status_code == 200
-    assert len(response_data) == 1
-    assert response_data[0]["name"] == "Past Event"
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Past Event"
+
+
+async def test_list_events_returns_requested_page_and_metadata(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    for name, days_from_now in [
+        ("First Event", 1),
+        ("Second Event", 2),
+        ("Third Event", 3),
+    ]:
+        await create_event_as_organizer(
+            client,
+            organizer_headers,
+            make_event_payload(
+                name=name,
+                days_from_now=days_from_now,
+            ),
+        )
+
+    response = await client.get(
+        "/api/events",
+        params={"page": 2, "page_size": 2},
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert response_data["page"] == 2
+    assert response_data["page_size"] == 2
+    assert response_data["total"] == 3
+    assert response_data["pages"] == 2
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Third Event"
+
+
+async def test_list_events_with_invalid_page_returns_422(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(
+        "/api/events",
+        params={"page": 0},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_events_with_too_large_page_size_returns_422(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(
+        "/api/events",
+        params={"page_size": 21},
+    )
+
+    assert response.status_code == 422
 
 
 async def test_update_own_event_as_organizer_returns_200(
