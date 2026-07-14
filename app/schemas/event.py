@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EventBase(BaseModel):
@@ -33,6 +33,17 @@ class EventListQuery(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=10, ge=1, le=20)
     event_status: Literal["upcoming", "past"] = "upcoming"
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+
+    @model_validator(mode='after')
+    def validate_date_range(self) -> Self:
+        if self.date_from is not None and self.date_to is not None:
+            if self.date_from > self.date_to:
+                raise ValueError
+
+        return self
+
 
 
 class EventPageResponse(BaseModel):

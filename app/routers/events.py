@@ -31,12 +31,20 @@ async def get_events(
 ) -> EventPageResponse:
     now = datetime.now(timezone.utc)
 
+    conditions = []
+
     if query.event_status == "upcoming":
-        conditions = [Event.date > now]
+        conditions.append(Event.date > now)
         ordering = (Event.date.asc(), Event.id.asc())
     else:
-        conditions = [Event.date < now]
+        conditions.append(Event.date < now)
         ordering = (Event.date.desc(), Event.id.desc())
+
+    if query.date_from is not None:
+        conditions.append(Event.date >= query.date_from)
+
+    if query.date_to is not None:
+        conditions.append(Event.date <= query.date_to)
 
     total = await db.scalar(
         select(func.count(Event.id)).where(*conditions)
