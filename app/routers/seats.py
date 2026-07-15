@@ -21,7 +21,7 @@ async def hold_seat(
         db: db_dep,
         seat_id: int,
         current_user: CurrentUser
-):
+) -> Hold:
     seat = await db.scalar(select(Seat).where(Seat.id == seat_id))
     if seat is None:
         raise HTTPException(
@@ -80,7 +80,7 @@ async def release_hold(
         db: db_dep,
         seat_id: int,
         current_user: CurrentUser
-):
+) -> None:
     seat = await db.scalar(select(Seat).where(Seat.id == seat_id))
     if seat is None:
         raise HTTPException(

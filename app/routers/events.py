@@ -74,7 +74,7 @@ async def get_events(
 
 
 @router.get("/{event_id}", response_model=EventResponse)
-async def get_event_by_id(db: db_dep, event_id: int):
+async def get_event_by_id(db: db_dep, event_id: int) -> Event:
     stmt = select(Event).where(Event.id == event_id)
     result = await db.execute(stmt)
     event = result.scalar_one_or_none()
@@ -89,7 +89,7 @@ async def get_event_by_id(db: db_dep, event_id: int):
 
 
 @router.get("/{event_id}/seats", response_model=list[SeatAvailabilityResponse])
-async def get_event_seats(db: db_dep, event_id: int, current_user: CurrentUser):
+async def get_event_seats(db: db_dep, event_id: int, current_user: CurrentUser) -> list[SeatAvailabilityResponse]:
     event_exists = await db.scalar(
         select(exists().where(Event.id == event_id))
     )
@@ -160,7 +160,7 @@ async def get_event_seats(db: db_dep, event_id: int, current_user: CurrentUser):
 async def create_event(
         db: db_dep,
         new_event: EventCreate,
-        current_user: Annotated[User, Depends(require_role("organizer"))]):
+        current_user: Annotated[User, Depends(require_role("organizer"))]) -> Event:
     event = Event(**new_event.model_dump(),
                   organizer_id=current_user.id)
     db.add(event)
@@ -178,7 +178,7 @@ async def update_event(
         User,
         Depends(require_role("organizer")),
     ],
-):
+) -> Event:
     stmt = select(Event).where(Event.id == event_id)
     event = await db.scalar(stmt)
 
@@ -218,7 +218,7 @@ async def create_event_seats(
         User,
         Depends(require_role("organizer")),
     ],
-):
+) -> list[Seat]:
     event = await db.scalar(
         select(Event).where(Event.id == event_id)
     )
@@ -291,4 +291,4 @@ async def create_event_seats(
         .order_by(Seat.row.asc(), Seat.number.asc())
     )
 
-    return result.scalars().all()
+    return list(result.scalars().all())
