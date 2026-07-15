@@ -1,43 +1,76 @@
-from app.core.deps import require_role, db_dep, CurrentUser
-from app.models import Hold, Booking
-from fastapi import APIRouter, Query, status, HTTPException, Depends
-from sqlalchemy import select, exists, and_, func
+from datetime import datetime, timezone
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, exists, func, select
+from sqlalchemy.exc import IntegrityError
+
+from app.core.deps import CurrentUser, db_dep, require_role
+from app.enums.seat_status import SeatStatus
+from app.models import Booking, Hold
 from app.models.event import Event
 from app.models.seat import Seat
 from app.models.user import User
-from datetime import datetime, timezone
-from app.schemas.event import EventResponse, EventCreate, EventUpdate
-from app.schemas.seat import SeatResponse, SeatAvailabilityResponse
+from app.schemas.event import (
+    EventCreate,
+    EventListQuery,
+    EventPageResponse,
+    EventResponse,
+    EventUpdate,
+)
 from app.schemas.hall import HallConfigurationCreate
-from typing import Annotated, Literal
-from sqlalchemy.exc import IntegrityError
-from app.enums.seat_status import SeatStatus
+from app.schemas.seat import SeatAvailabilityResponse, SeatResponse
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 
-@router.get("", response_model=list[EventResponse])
+@router.get("", response_model=EventPageResponse)
 async def get_events(
     db: db_dep,
-    limit: Annotated[int, Query(ge=1, le=20)] = 10,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    event_status: Literal["upcoming", "past"] = "upcoming",
-):
+    query: Annotated[EventListQuery, Query()],
+) -> EventPageResponse:
     now = datetime.now(timezone.utc)
 
-    order_by = Event.date.asc() if event_status == "upcoming" else Event.date.desc()
-    condition = Event.date > now if event_status == "upcoming" else Event.date < now
+    conditions = []
+
+    if query.event_status == "upcoming":
+        conditions.append(Event.date > now)
+        ordering = (Event.date.asc(), Event.id.asc())
+    else:
+        conditions.append(Event.date < now)
+        ordering = (Event.date.desc(), Event.id.desc())
+
+    if query.date_from is not None:
+        conditions.append(Event.date >= query.date_from)
+
+    if query.date_to is not None:
+        conditions.append(Event.date <= query.date_to)
+
+    total = await db.scalar(
+        select(func.count(Event.id)).where(*conditions)
+    )
+    total = total or 0
+
+    offset = (query.page - 1) * query.page_size
 
     stmt = (
         select(Event)
-        .where(condition)
-        .order_by(order_by)
-        .limit(limit)
+        .where(*conditions)
+        .order_by(*ordering)
+        .limit(query.page_size)
         .offset(offset)
     )
 
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    events = list((await db.scalars(stmt)).all())
+    pages = (total + query.page_size - 1) // query.page_size
+
+    return EventPageResponse(
+        items=events,
+        page=query.page,
+        page_size=query.page_size,
+        total=total,
+        pages=pages,
+    )
 
 
 @router.get("/{event_id}", response_model=EventResponse)

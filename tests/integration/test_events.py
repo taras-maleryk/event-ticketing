@@ -2,8 +2,9 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.event import Event
-from tests.utils.events import make_event_payload, create_event_as_organizer
-
+from tests.conftest import db_session, client, organizer_headers
+from tests.utils.events import create_event_as_organizer, make_event_payload
+from datetime import datetime, timezone, timedelta
 
 async def test_create_event_without_auth_returns_401(client: AsyncClient) -> None:
     payload = make_event_payload()
@@ -136,8 +137,12 @@ async def test_list_events_returns_upcoming_events_by_default(
     response_data = response.json()
 
     assert response.status_code == 200
-    assert len(response_data) == 1
-    assert response_data[0]["name"] == "Future Event"
+    assert response_data["page"] == 1
+    assert response_data["page_size"] == 10
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Future Event"
 
 
 async def test_list_events_with_past_status_returns_past_events(
@@ -172,8 +177,66 @@ async def test_list_events_with_past_status_returns_past_events(
     response_data = response.json()
 
     assert response.status_code == 200
-    assert len(response_data) == 1
-    assert response_data[0]["name"] == "Past Event"
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Past Event"
+
+
+async def test_list_events_returns_requested_page_and_metadata(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    for name, days_from_now in [
+        ("First Event", 1),
+        ("Second Event", 2),
+        ("Third Event", 3),
+    ]:
+        await create_event_as_organizer(
+            client,
+            organizer_headers,
+            make_event_payload(
+                name=name,
+                days_from_now=days_from_now,
+            ),
+        )
+
+    response = await client.get(
+        "/api/events",
+        params={"page": 2, "page_size": 2},
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert response_data["page"] == 2
+    assert response_data["page_size"] == 2
+    assert response_data["total"] == 3
+    assert response_data["pages"] == 2
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Third Event"
+
+
+async def test_list_events_with_invalid_page_returns_422(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(
+        "/api/events",
+        params={"page": 0},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_events_with_too_large_page_size_returns_422(
+    client: AsyncClient,
+) -> None:
+    response = await client.get(
+        "/api/events",
+        params={"page_size": 21},
+    )
+
+    assert response.status_code == 422
 
 
 async def test_update_own_event_as_organizer_returns_200(
@@ -299,3 +362,259 @@ async def test_update_another_organizers_event_returns_403(
 
     assert event_after_failed_update is not None
     assert event_after_failed_update.name == "Owner Event"
+
+
+async def test_list_events_filters_by_date_from(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Earlier Event",
+            days_from_now=1,
+        ),
+    )
+
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Later Event",
+            days_from_now=3,
+        ),
+    )
+
+    date_from = datetime.now(timezone.utc) + timedelta(days=2)
+
+    response = await client.get(
+        "/api/events",
+        params={"date_from": date_from.isoformat()},
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200, response.text
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Later Event"
+
+
+async def test_list_events_filters_by_date_to(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Earlier Event",
+            days_from_now=1,
+        ),
+    )
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Later Event",
+            days_from_now=3,
+        ),
+    )
+
+    date_to = datetime.now(timezone.utc) + timedelta(days=2)
+
+    response = await client.get(
+        "/api/events",
+        params={"date_to": date_to.isoformat()},
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200, response.text
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Earlier Event"
+
+
+async def test_list_events_filters_by_date_range(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Before Range",
+            days_from_now=1,
+        ),
+    )
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Inside Range",
+            days_from_now=3,
+        ),
+    )
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="After Range",
+            days_from_now=5,
+        ),
+    )
+
+    now = datetime.now(timezone.utc)
+    date_from = now + timedelta(days=2)
+    date_to = now + timedelta(days=4)
+
+    response = await client.get(
+        "/api/events",
+        params={
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+        },
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200, response.text
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Inside Range"
+
+
+async def test_list_events_with_invalid_date_range_returns_422(
+    client: AsyncClient,
+) -> None:
+    now = datetime.now(timezone.utc)
+
+    response = await client.get(
+        "/api/events",
+        params={
+            "date_from": (
+                now + timedelta(days=3)
+            ).isoformat(),
+            "date_to": (
+                now + timedelta(days=1)
+            ).isoformat(),
+        },
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_events_pagination_metadata_respects_date_filters(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    for name, days_from_now in [
+        ("First Event", 1),
+        ("Second Event", 2),
+        ("Third Event", 3),
+        ("Fourth Event", 4),
+        ("Fifth Event", 5),
+    ]:
+        await create_event_as_organizer(
+            client,
+            organizer_headers,
+            make_event_payload(
+                name=name,
+                days_from_now=days_from_now,
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+
+    response = await client.get(
+        "/api/events",
+        params={
+            "date_from": (
+                now + timedelta(days=2, hours=12)
+            ).isoformat(),
+            "date_to": (
+                now + timedelta(days=5, hours=12)
+            ).isoformat(),
+            "page": 2,
+            "page_size": 2,
+        },
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200, response.text
+    assert response_data["page"] == 2
+    assert response_data["page_size"] == 2
+    assert response_data["total"] == 3
+    assert response_data["pages"] == 2
+    assert len(response_data["items"]) == 1
+    assert response_data["items"][0]["name"] == "Fifth Event"
+
+
+async def test_list_events_combines_past_status_with_date_range(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Older Past Event",
+            days_from_now=-5,
+        ),
+    )
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Past Event Inside Range",
+            days_from_now=-3,
+        ),
+    )
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Recent Past Event",
+            days_from_now=-1,
+        ),
+    )
+    await create_event_as_organizer(
+        client,
+        organizer_headers,
+        make_event_payload(
+            name="Future Event",
+            days_from_now=1,
+        ),
+    )
+
+    now = datetime.now(timezone.utc)
+
+    response = await client.get(
+        "/api/events",
+        params={
+            "event_status": "past",
+            "date_from": (
+                now - timedelta(days=4)
+            ).isoformat(),
+            "date_to": (
+                now - timedelta(days=2)
+            ).isoformat(),
+        },
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200, response.text
+    assert response_data["total"] == 1
+    assert response_data["pages"] == 1
+    assert len(response_data["items"]) == 1
+    assert (
+        response_data["items"][0]["name"]
+        == "Past Event Inside Range"
+    )
