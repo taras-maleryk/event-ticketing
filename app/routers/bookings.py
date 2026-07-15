@@ -21,7 +21,7 @@ async def confirm_booking(
         db: db_dep,
         current_user: CurrentUser,
         hold_id: int
-):
+) -> Booking:
     stmt = (
         select(Hold)
         .where(Hold.id == hold_id)

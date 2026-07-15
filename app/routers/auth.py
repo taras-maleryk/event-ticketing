@@ -19,7 +19,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_in: UserCreate, db: db_dep):
+async def register(user_in: UserCreate, db: db_dep) -> User:
     stmt = select(User).filter(User.email == user_in.email)
     result = await db.execute(stmt)
     if result.scalar_one_or_none():
@@ -47,7 +47,7 @@ async def login(
         response: Response,
         db: db_dep,
         form_data: OAuth2PasswordRequestForm = Depends(),
-):
+) -> dict[str, str]:
     stmt = select(User).filter(User.email == form_data.username)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
@@ -93,7 +93,7 @@ async def login(
 async def refresh_token(
         response: Response,
         refresh_token: str | None = Cookie(default=None)
-):
+) -> dict[str, str]:
     if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -133,7 +133,7 @@ async def refresh_token(
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(response: Response) -> dict[str, str]:
     is_secure = settings.ENVIRONMENT == "production"
 
     response.delete_cookie(key="access_token", samesite="lax", secure=is_secure)

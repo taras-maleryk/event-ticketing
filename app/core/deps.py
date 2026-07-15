@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Callable, Awaitable
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +65,7 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def require_role(allowed_role: str):
+def require_role(allowed_role: str) -> Callable[[CurrentUser], Awaitable[User]]:
     async def check_role(current_user: CurrentUser) -> User:
         if current_user.role != allowed_role:
             raise HTTPException(
