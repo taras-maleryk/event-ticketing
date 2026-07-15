@@ -76,3 +76,5 @@ vine==5.1.0
 watchfiles==1.2.0
 wcwidth==0.8.2
 websockets==16.0
+mypy==2.3.0
+types-passlib==1.7.7.20260211
