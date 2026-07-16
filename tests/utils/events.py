@@ -1,5 +1,7 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from httpx import AsyncClient
+
 
 def make_event_payload(
     *,
@@ -11,9 +13,7 @@ def make_event_payload(
     return {
         "name": name,
         "venue": venue,
-        "date": (
-            datetime.now(timezone.utc) + timedelta(days=days_from_now)
-        ).isoformat(),
+        "date": (datetime.now(UTC) + timedelta(days=days_from_now)).isoformat(),
         "description": description,
     }
 

@@ -1,11 +1,13 @@
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.enums.seat_status import SeatStatus
+from app.models.seat import Seat
 from tests.utils.events import create_event_as_organizer
 from tests.utils.halls import make_hall_config_payload
-from app.models.seat import Seat
-from app.enums.seat_status import SeatStatus
 from tests.utils.seats import create_seats_for_event
+
 
 async def test_create_event_seats_without_auth_returns_401(
     client: AsyncClient,
@@ -122,12 +124,16 @@ async def test_create_event_seats_as_owner_organizer_returns_201(
     assert "price" in response_data[-1]
 
     seats = (
-        await db_session.execute(
-            select(Seat)
-            .where(Seat.event_id == created_event["id"])
-            .order_by(Seat.row.asc(), Seat.number.asc())
+        (
+            await db_session.execute(
+                select(Seat)
+                .where(Seat.event_id == created_event["id"])
+                .order_by(Seat.row.asc(), Seat.number.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert len(seats) == 6
     assert seats[0].row == 1
@@ -201,10 +207,7 @@ async def test_create_event_seats_respects_excluded_seats(
     assert response.status_code == 201
     assert len(response_data) == 3
 
-    returned_positions = [
-        (seat["row"], seat["number"])
-        for seat in response_data
-    ]
+    returned_positions = [(seat["row"], seat["number"]) for seat in response_data]
 
     assert returned_positions == [
         (1, 1),
@@ -213,17 +216,18 @@ async def test_create_event_seats_respects_excluded_seats(
     ]
 
     seats = (
-        await db_session.execute(
-            select(Seat)
-            .where(Seat.event_id == created_event["id"])
-            .order_by(Seat.row.asc(), Seat.number.asc())
+        (
+            await db_session.execute(
+                select(Seat)
+                .where(Seat.event_id == created_event["id"])
+                .order_by(Seat.row.asc(), Seat.number.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    db_positions = [
-        (seat.row, seat.number)
-        for seat in seats
-    ]
+    db_positions = [(seat.row, seat.number) for seat in seats]
 
     assert db_positions == [
         (1, 1),
@@ -267,10 +271,7 @@ async def test_create_event_seats_uses_row_prices(
 
     assert response.status_code == 201
 
-    returned_prices = [
-        seat["price"]
-        for seat in response_data
-    ]
+    returned_prices = [seat["price"] for seat in response_data]
 
     assert returned_prices == [
         1000,
@@ -280,17 +281,18 @@ async def test_create_event_seats_uses_row_prices(
     ]
 
     seats = (
-        await db_session.execute(
-            select(Seat)
-            .where(Seat.event_id == created_event["id"])
-            .order_by(Seat.row.asc(), Seat.number.asc())
+        (
+            await db_session.execute(
+                select(Seat)
+                .where(Seat.event_id == created_event["id"])
+                .order_by(Seat.row.asc(), Seat.number.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
-    db_prices = [
-        seat.price
-        for seat in seats
-    ]
+    db_prices = [seat.price for seat in seats]
 
     assert db_prices == [
         1000,
@@ -315,9 +317,7 @@ async def test_get_event_seats_without_auth_returns_401(
         created_event["id"],
     )
 
-    response = await client.get(
-        f"/api/events/{created_event['id']}/seats"
-    )
+    response = await client.get(f"/api/events/{created_event['id']}/seats")
 
     response_data = response.json()
 
@@ -377,10 +377,7 @@ async def test_get_event_seats_returns_available_seats(
     assert response_data[-1]["number"] == 3
     assert response_data[-1]["status"] == SeatStatus.AVAILABLE.value
 
-    assert all(
-        seat["status"] == SeatStatus.AVAILABLE.value
-        for seat in response_data
-    )
+    assert all(seat["status"] == SeatStatus.AVAILABLE.value for seat in response_data)
 
 
 async def test_get_event_seats_returns_seats_ordered_by_row_and_number(
@@ -426,10 +423,7 @@ async def test_get_event_seats_returns_seats_ordered_by_row_and_number(
 
     response_data = response.json()
 
-    returned_positions = [
-        (seat["row"], seat["number"])
-        for seat in response_data
-    ]
+    returned_positions = [(seat["row"], seat["number"]) for seat in response_data]
 
     assert response.status_code == 200
     assert returned_positions == [

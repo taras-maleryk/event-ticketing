@@ -1,13 +1,15 @@
-from app.models.booking import Booking
+import secrets
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, HTTPException, status
-from app.core.deps import db_dep, CurrentUser
-from app.models.seat import Seat
-from app.models.hold import Hold
-from app.schemas.booking import BookingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from datetime import datetime, timezone
-import secrets
+
+from app.core.deps import CurrentUser, db_dep
+from app.models.booking import Booking
+from app.models.hold import Hold
+from app.models.seat import Seat
+from app.schemas.booking import BookingResponse
 
 router = APIRouter(prefix="/holds", tags=["bookings"])
 
@@ -15,18 +17,12 @@ router = APIRouter(prefix="/holds", tags=["bookings"])
 @router.post(
     "/{hold_id}/book",
     status_code=status.HTTP_201_CREATED,
-    response_model=BookingResponse
+    response_model=BookingResponse,
 )
 async def confirm_booking(
-        db: db_dep,
-        current_user: CurrentUser,
-        hold_id: int
+    db: db_dep, current_user: CurrentUser, hold_id: int
 ) -> Booking:
-    stmt = (
-        select(Hold)
-        .where(Hold.id == hold_id)
-        .with_for_update()
-    )
+    stmt = select(Hold).where(Hold.id == hold_id).with_for_update()
 
     hold = await db.scalar(stmt)
 
@@ -42,7 +38,7 @@ async def confirm_booking(
             detail="Hold is not yours",
         )
 
-    if hold.held_until <= datetime.now(timezone.utc):
+    if hold.held_until <= datetime.now(UTC):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Hold has expired",
@@ -58,7 +54,7 @@ async def confirm_booking(
             detail="Seat is already booked",
         )
 
-    #payment implementation
+    # payment implementation
 
     price_paid = await db.scalar(select(Seat.price).where(Seat.id == hold.seat_id))
 
@@ -74,7 +70,7 @@ async def confirm_booking(
         seat_id=hold.seat_id,
         user_id=hold.user_id,
         price_paid=price_paid,
-        ticket_token=ticket_token
+        ticket_token=ticket_token,
     )
 
     db.add(booking)
@@ -83,8 +79,9 @@ async def confirm_booking(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="Seat is already booked") from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Seat is already booked"
+        ) from exc
 
     await db.refresh(booking)
 

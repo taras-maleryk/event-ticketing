@@ -1,10 +1,12 @@
+from datetime import UTC, datetime, timedelta
+
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.event import Event
-from tests.conftest import db_session, client, organizer_headers
 from tests.utils.events import create_event_as_organizer, make_event_payload
-from datetime import datetime, timezone, timedelta
+
 
 async def test_create_event_without_auth_returns_401(client: AsyncClient) -> None:
     payload = make_event_payload()
@@ -82,9 +84,7 @@ async def test_get_event_by_id_returns_event(
         event_payload,
     )
 
-    response = await client.get(
-        f"/api/events/{created_event['id']}"
-    )
+    response = await client.get(f"/api/events/{created_event['id']}")
 
     response_data = response.json()
 
@@ -386,7 +386,7 @@ async def test_list_events_filters_by_date_from(
         ),
     )
 
-    date_from = datetime.now(timezone.utc) + timedelta(days=2)
+    date_from = datetime.now(UTC) + timedelta(days=2)
 
     response = await client.get(
         "/api/events",
@@ -423,7 +423,7 @@ async def test_list_events_filters_by_date_to(
         ),
     )
 
-    date_to = datetime.now(timezone.utc) + timedelta(days=2)
+    date_to = datetime.now(UTC) + timedelta(days=2)
 
     response = await client.get(
         "/api/events",
@@ -468,7 +468,7 @@ async def test_list_events_filters_by_date_range(
         ),
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     date_from = now + timedelta(days=2)
     date_to = now + timedelta(days=4)
 
@@ -492,17 +492,13 @@ async def test_list_events_filters_by_date_range(
 async def test_list_events_with_invalid_date_range_returns_422(
     client: AsyncClient,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     response = await client.get(
         "/api/events",
         params={
-            "date_from": (
-                now + timedelta(days=3)
-            ).isoformat(),
-            "date_to": (
-                now + timedelta(days=1)
-            ).isoformat(),
+            "date_from": (now + timedelta(days=3)).isoformat(),
+            "date_to": (now + timedelta(days=1)).isoformat(),
         },
     )
 
@@ -529,17 +525,13 @@ async def test_list_events_pagination_metadata_respects_date_filters(
             ),
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     response = await client.get(
         "/api/events",
         params={
-            "date_from": (
-                now + timedelta(days=2, hours=12)
-            ).isoformat(),
-            "date_to": (
-                now + timedelta(days=5, hours=12)
-            ).isoformat(),
+            "date_from": (now + timedelta(days=2, hours=12)).isoformat(),
+            "date_to": (now + timedelta(days=5, hours=12)).isoformat(),
             "page": 2,
             "page_size": 2,
         },
@@ -593,18 +585,14 @@ async def test_list_events_combines_past_status_with_date_range(
         ),
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     response = await client.get(
         "/api/events",
         params={
             "event_status": "past",
-            "date_from": (
-                now - timedelta(days=4)
-            ).isoformat(),
-            "date_to": (
-                now - timedelta(days=2)
-            ).isoformat(),
+            "date_from": (now - timedelta(days=4)).isoformat(),
+            "date_to": (now - timedelta(days=2)).isoformat(),
         },
     )
 
@@ -614,7 +602,4 @@ async def test_list_events_combines_past_status_with_date_range(
     assert response_data["total"] == 1
     assert response_data["pages"] == 1
     assert len(response_data["items"]) == 1
-    assert (
-        response_data["items"][0]["name"]
-        == "Past Event Inside Range"
-    )
+    assert response_data["items"][0]["name"] == "Past Event Inside Range"

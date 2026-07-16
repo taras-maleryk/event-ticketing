@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
+
 from app.enums.seat_status import SeatStatus
+
 
 class SeatBase(BaseModel):
     row: int = Field(gt=0)

@@ -1,12 +1,14 @@
-from pydantic import BaseModel, EmailStr, field_validator, model_validator, ConfigDict
 import re
 from datetime import datetime
 from typing import Self
+
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, model_validator
 
 
 class UserBase(BaseModel):
     name: str
     email: EmailStr
+
 
 class UserCreate(UserBase):
     password: str

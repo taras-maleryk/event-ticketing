@@ -1,37 +1,30 @@
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, HTTPException, status
-from app.core.deps import db_dep, CurrentUser
-from app.models.seat import Seat
-from app.models.hold import Hold
-from app.schemas.hold import HoldResponse
 from sqlalchemy import select
-from datetime import datetime, timedelta, timezone
-from app.core.config import settings
 from sqlalchemy.exc import IntegrityError
+
+from app.core.config import settings
+from app.core.deps import CurrentUser, db_dep
 from app.models.booking import Booking
+from app.models.hold import Hold
+from app.models.seat import Seat
+from app.schemas.hold import HoldResponse
 
 router = APIRouter(prefix="/seats", tags=["seats"])
 
 
 @router.post(
-    "/{seat_id}/hold",
-    status_code=status.HTTP_201_CREATED,
-    response_model=HoldResponse
+    "/{seat_id}/hold", status_code=status.HTTP_201_CREATED, response_model=HoldResponse
 )
-async def hold_seat(
-        db: db_dep,
-        seat_id: int,
-        current_user: CurrentUser
-) -> Hold:
+async def hold_seat(db: db_dep, seat_id: int, current_user: CurrentUser) -> Hold:
     seat = await db.scalar(select(Seat).where(Seat.id == seat_id))
     if seat is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Seat not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Seat not found"
         )
 
-    booking_id = await db.scalar(
-        select(Booking.id).where(Booking.seat_id == seat_id)
-    )
+    booking_id = await db.scalar(select(Booking.id).where(Booking.seat_id == seat_id))
 
     if booking_id is not None:
         raise HTTPException(
@@ -42,7 +35,7 @@ async def hold_seat(
     hold = Hold(
         user_id=current_user.id,
         seat_id=seat_id,
-        held_until=datetime.now(timezone.utc) + timedelta(minutes=settings.HOLD_FOR_MINUTES)
+        held_until=datetime.now(UTC) + timedelta(minutes=settings.HOLD_FOR_MINUTES),
     )
 
     db.add(hold)
@@ -57,9 +50,7 @@ async def hold_seat(
             detail="Seat is already held",
         ) from exc
 
-    booking_id = await db.scalar(
-        select(Booking.id).where(Booking.seat_id == seat_id)
-    )
+    booking_id = await db.scalar(select(Booking.id).where(Booking.seat_id == seat_id))
 
     if booking_id is not None:
         await db.rollback()
@@ -76,16 +67,11 @@ async def hold_seat(
 
 
 @router.delete("/{seat_id}/hold", status_code=status.HTTP_204_NO_CONTENT)
-async def release_hold(
-        db: db_dep,
-        seat_id: int,
-        current_user: CurrentUser
-) -> None:
+async def release_hold(db: db_dep, seat_id: int, current_user: CurrentUser) -> None:
     seat = await db.scalar(select(Seat).where(Seat.id == seat_id))
     if seat is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Seat not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Seat not found"
         )
 
     stmt = (
@@ -102,8 +88,7 @@ async def release_hold(
 
     if hold is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Hold not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Hold not found"
         )
 
     await db.delete(hold)

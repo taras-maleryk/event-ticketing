@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -29,7 +29,7 @@ async def get_events(
     db: db_dep,
     query: Annotated[EventListQuery, Query()],
 ) -> EventPageResponse:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     conditions = []
 
@@ -46,9 +46,7 @@ async def get_events(
     if query.date_to is not None:
         conditions.append(Event.date <= query.date_to)
 
-    total = await db.scalar(
-        select(func.count(Event.id)).where(*conditions)
-    )
+    total = await db.scalar(select(func.count(Event.id)).where(*conditions))
     total = total or 0
 
     offset = (query.page - 1) * query.page_size
@@ -81,18 +79,17 @@ async def get_event_by_id(db: db_dep, event_id: int) -> Event:
 
     if not event:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Event not found"
         )
 
     return event
 
 
 @router.get("/{event_id}/seats", response_model=list[SeatAvailabilityResponse])
-async def get_event_seats(db: db_dep, event_id: int, current_user: CurrentUser) -> list[SeatAvailabilityResponse]:
-    event_exists = await db.scalar(
-        select(exists().where(Event.id == event_id))
-    )
+async def get_event_seats(
+    db: db_dep, event_id: int, current_user: CurrentUser
+) -> list[SeatAvailabilityResponse]:
+    event_exists = await db.scalar(select(exists().where(Event.id == event_id)))
 
     if not event_exists:
         raise HTTPException(
@@ -158,11 +155,11 @@ async def get_event_seats(db: db_dep, event_id: int, current_user: CurrentUser) 
 
 @router.post("", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
 async def create_event(
-        db: db_dep,
-        new_event: EventCreate,
-        current_user: Annotated[User, Depends(require_role("organizer"))]) -> Event:
-    event = Event(**new_event.model_dump(),
-                  organizer_id=current_user.id)
+    db: db_dep,
+    new_event: EventCreate,
+    current_user: Annotated[User, Depends(require_role("organizer"))],
+) -> Event:
+    event = Event(**new_event.model_dump(), organizer_id=current_user.id)
     db.add(event)
     await db.commit()
     await db.refresh(event)
@@ -219,9 +216,7 @@ async def create_event_seats(
         Depends(require_role("organizer")),
     ],
 ) -> list[Seat]:
-    event = await db.scalar(
-        select(Event).where(Event.id == event_id)
-    )
+    event = await db.scalar(select(Event).where(Event.id == event_id))
 
     if event is None:
         raise HTTPException(
@@ -235,9 +230,7 @@ async def create_event_seats(
             detail="You cannot manage seats for this event",
         )
 
-    seats_exist = await db.scalar(
-        select(exists().where(Seat.event_id == event_id))
-    )
+    seats_exist = await db.scalar(select(exists().where(Seat.event_id == event_id)))
 
     if seats_exist:
         raise HTTPException(
@@ -245,14 +238,10 @@ async def create_event_seats(
             detail="Seats have already been created for this event",
         )
 
-    prices_by_row = {
-        item.row: item.price
-        for item in hall_config.row_prices
-    }
+    prices_by_row = {item.row: item.price for item in hall_config.row_prices}
 
     excluded_by_row = {
-        item.row: set(item.excluded_numbers)
-        for item in hall_config.excluded_seats
+        item.row: set(item.excluded_numbers) for item in hall_config.excluded_seats
     }
 
     seats = []

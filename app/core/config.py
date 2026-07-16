@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "EventTicketingAPI"
     DATABASE_URL: str
@@ -15,5 +16,6 @@ class Settings(BaseSettings):
     DB_ECHO: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
 
 settings = Settings()

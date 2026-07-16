@@ -4,10 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.booking import Booking
 from app.models.hold import Hold
+from app.models.user import User
 from tests.utils.holds import create_hold_for_seat
 from tests.utils.seats import create_event_with_seats
-from datetime import datetime, timedelta, timezone
-from app.models.user import User
+
 
 async def test_book_hold_without_auth_returns_401(
     client: AsyncClient,
@@ -90,9 +90,7 @@ async def test_book_hold_successfully(
         select(Booking).where(Booking.id == response_data["id"])
     )
 
-    hold = await db_session.scalar(
-        select(Hold).where(Hold.id == created_hold["id"])
-    )
+    hold = await db_session.scalar(select(Hold).where(Hold.id == created_hold["id"]))
 
     assert booking is not None
     assert booking.seat_id == created_seat["id"]
@@ -132,13 +130,9 @@ async def test_book_another_users_hold_returns_403(
     assert response.status_code == 403
     assert response_data["detail"] == "Hold is not yours"
 
-    hold = await db_session.scalar(
-        select(Hold).where(Hold.id == created_hold["id"])
-    )
+    hold = await db_session.scalar(select(Hold).where(Hold.id == created_hold["id"]))
 
-    booking = await db_session.scalar(
-        select(Booking).where(Booking.seat_id == seat_id)
-    )
+    booking = await db_session.scalar(select(Booking).where(Booking.seat_id == seat_id))
 
     assert hold is not None
     assert booking is None
@@ -189,8 +183,6 @@ async def test_book_hold_for_already_booked_seat_returns_409(
     assert response.status_code == 409
     assert response_data["detail"] == "Seat is already booked"
 
-    hold = await db_session.scalar(
-        select(Hold).where(Hold.id == created_hold["id"])
-    )
+    hold = await db_session.scalar(select(Hold).where(Hold.id == created_hold["id"]))
 
     assert hold is not None

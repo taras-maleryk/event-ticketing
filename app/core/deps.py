@@ -1,23 +1,24 @@
-from typing import Annotated, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Annotated
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from pydantic import ValidationError
-from app.core.security import decode_token
-from app.schemas.token import TokenData
-from app.models.user import User
-from app.db.async_session import get_db
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import decode_token
+from app.db.async_session import get_db
+from app.models.user import User
+from app.schemas.token import TokenData
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 db_dep = Annotated[AsyncSession, Depends(get_db)]
 
+
 async def get_current_user(
-        request: Request,
-        token: Annotated[str | None, Depends(oauth2_scheme)],
-        db: db_dep
+    request: Request, token: Annotated[str | None, Depends(oauth2_scheme)], db: db_dep
 ) -> User:
 
     credentials_exception = HTTPException(
@@ -38,8 +39,7 @@ async def get_current_user(
     token_type: str | None = payload.get("type")
     if token_type != "access":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid token type"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token type"
         )
 
     try:
@@ -49,7 +49,7 @@ async def get_current_user(
 
         token_data = TokenData(id=int(user_id_str))
     except (ValueError, ValidationError):
-        raise credentials_exception
+        raise credentials_exception from None
 
     stmt = select(User).filter(User.id == token_data.id)
     result = await db.execute(stmt)
@@ -69,8 +69,7 @@ def require_role(allowed_role: str) -> Callable[[CurrentUser], Awaitable[User]]:
     async def check_role(current_user: CurrentUser) -> User:
         if current_user.role != allowed_role:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not enough permissions"
+                status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
             )
         return current_user
 

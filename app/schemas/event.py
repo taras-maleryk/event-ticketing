@@ -36,14 +36,13 @@ class EventListQuery(BaseModel):
     date_from: datetime | None = None
     date_to: datetime | None = None
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_date_range(self) -> Self:
         if self.date_from is not None and self.date_to is not None:
             if self.date_from > self.date_to:
                 raise ValueError
 
         return self
-
 
 
 class EventPageResponse(BaseModel):

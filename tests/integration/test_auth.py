@@ -2,8 +2,9 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
 from app.core.security import create_access_token, create_refresh_token
+from app.models.user import User
+
 
 async def test_register_user_successfully(
     client: AsyncClient,
@@ -33,9 +34,7 @@ async def test_register_user_successfully(
     assert "hashed_password" not in data
     assert "password" not in data
 
-    user = await db_session.scalar(
-        select(User).where(User.email == "john@example.com")
-    )
+    user = await db_session.scalar(select(User).where(User.email == "john@example.com"))
 
     assert user is not None
     assert user.name == "John Doe"
@@ -45,7 +44,7 @@ async def test_register_user_successfully(
 
 
 async def test_register_duplicate_email(
-        client: AsyncClient,
+    client: AsyncClient,
 ) -> None:
     payload = {
         "name": "John Doe",
@@ -64,13 +63,10 @@ async def test_register_duplicate_email(
         "name": "Tom Norris",
         "email": "john@example.com",
         "password": "SuperStrongPass123",
-        "confirm_password": "SuperStrongPass123"
+        "confirm_password": "SuperStrongPass123",
     }
 
-    second_response = await client.post(
-        "/api/auth/register",
-        json=second_payload
-    )
+    second_response = await client.post("/api/auth/register", json=second_payload)
 
     data = second_response.json()
 
@@ -265,9 +261,7 @@ async def test_refresh_with_invalid_token_returns_401(
 async def test_refresh_with_access_token_returns_401(
     client: AsyncClient,
 ) -> None:
-    access_token = create_access_token(
-        data={"sub": "1"}
-    )
+    access_token = create_access_token(data={"sub": "1"})
 
     client.cookies.set(
         "refresh_token",
