@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime, timezone
 
 from httpx import AsyncClient
 from sqlalchemy import func, select
@@ -50,21 +49,14 @@ async def test_concurrent_hold_requests_allow_only_one_success(
 
     responses = await asyncio.gather(*requests)
 
-    status_codes = [
-        response.status_code
-        for response in responses
-    ]
+    status_codes = [response.status_code for response in responses]
 
     assert status_codes.count(201) == 1
     assert status_codes.count(409) == 9
-    assert all(
-        status_code in {201, 409}
-        for status_code in status_codes
-    )
+    assert all(status_code in {201, 409} for status_code in status_codes)
 
     active_holds_count = await db_session.scalar(
-        select(func.count(Hold.id))
-        .where(
+        select(func.count(Hold.id)).where(
             Hold.seat_id == seat_id,
             Hold.held_until > func.now(),
         )

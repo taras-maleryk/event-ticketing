@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -11,15 +11,12 @@ from tests.utils.bookings import create_booking_for_hold
 from tests.utils.holds import create_hold_for_seat
 from tests.utils.seats import create_event_with_seats
 
+
 def find_seat_by_id(
     response_data: list[dict],
     seat_id: int,
 ) -> dict:
-    return next(
-        seat
-        for seat in response_data
-        if seat["id"] == seat_id
-    )
+    return next(seat for seat in response_data if seat["id"] == seat_id)
 
 
 async def test_get_event_seats_returns_held_statuses(
@@ -173,7 +170,7 @@ async def test_get_event_seats_ignores_expired_holds(
 
     assert user is not None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     expired_hold = Hold(
         seat_id=seat_id,

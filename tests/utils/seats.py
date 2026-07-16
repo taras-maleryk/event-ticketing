@@ -1,6 +1,8 @@
 from httpx import AsyncClient
-from tests.utils.halls import make_hall_config_payload
+
 from tests.utils.events import create_event_as_organizer
+from tests.utils.halls import make_hall_config_payload
+
 
 async def create_seats_for_event(
     client: AsyncClient,

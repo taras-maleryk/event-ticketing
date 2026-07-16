@@ -1,14 +1,10 @@
 from celery import Celery
-
-from app.core.config import settings
 from celery.schedules import crontab
 
+from app.core.config import settings
+
 celery_app = Celery(
-    "event_ticketing",
-    broker=settings.REDIS_URL,
-    include=[
-        "app.tasks.holds"
-    ]
+    "event_ticketing", broker=settings.REDIS_URL, include=["app.tasks.holds"]
 )
 
 celery_app.conf.update(

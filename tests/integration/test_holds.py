@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -8,8 +8,9 @@ from app.models.booking import Booking
 from app.models.hold import Hold
 from app.models.seat import Seat
 from app.models.user import User
-from tests.utils.seats import create_event_with_seats
 from tests.utils.holds import create_hold_for_seat
+from tests.utils.seats import create_event_with_seats
+
 
 async def test_hold_seat_without_auth_returns_401(
     client: AsyncClient,
@@ -73,9 +74,7 @@ async def test_hold_seat_successfully(
     assert "id" in response_data
     assert "held_until" in response_data
 
-    hold = await db_session.scalar(
-        select(Hold).where(Hold.seat_id == seat_id)
-    )
+    hold = await db_session.scalar(select(Hold).where(Hold.seat_id == seat_id))
 
     user = await db_session.scalar(
         select(User).where(User.email == "regular@example.com")
@@ -85,7 +84,7 @@ async def test_hold_seat_successfully(
     assert hold is not None
     assert hold.seat_id == seat_id
     assert hold.user_id == user.id
-    assert hold.held_until > datetime.now(timezone.utc)
+    assert hold.held_until > datetime.now(UTC)
 
 
 async def test_hold_already_held_seat_returns_409(
@@ -132,9 +131,7 @@ async def test_hold_booked_seat_returns_409(
 
     seat_id = created_seats[0]["id"]
 
-    seat = await db_session.scalar(
-        select(Seat).where(Seat.id == seat_id)
-    )
+    seat = await db_session.scalar(select(Seat).where(Seat.id == seat_id))
     user = await db_session.scalar(
         select(User).where(User.email == "regular@example.com")
     )
@@ -227,9 +224,7 @@ async def test_release_hold_successfully(
     assert response.status_code == 204
     assert response.content == b""
 
-    hold = await db_session.scalar(
-        select(Hold).where(Hold.id == created_hold["id"])
-    )
+    hold = await db_session.scalar(select(Hold).where(Hold.id == created_hold["id"]))
 
     assert hold is None
 
@@ -287,11 +282,7 @@ async def test_release_another_users_hold_returns_404(
     assert response.status_code == 404
     assert response_data["detail"] == "Hold not found"
 
-    hold = await db_session.scalar(
-        select(Hold).where(Hold.id == created_hold["id"])
-    )
+    hold = await db_session.scalar(select(Hold).where(Hold.id == created_hold["id"]))
 
     assert hold is not None
     assert hold.seat_id == seat_id
-
-

@@ -38,15 +38,11 @@ async def test_protected_endpoint_with_refresh_token_returns_403(
         role="user",
     )
 
-    user = await db_session.scalar(
-        select(User).where(User.email == email)
-    )
+    user = await db_session.scalar(select(User).where(User.email == email))
 
     assert user is not None
 
-    refresh_token = create_refresh_token(
-        data={"sub": str(user.id)}
-    )
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
 
     response = await client.get(
         "/api/events/999/seats",
@@ -79,9 +75,7 @@ async def test_protected_endpoint_with_access_token_without_sub_returns_401(
 async def test_protected_endpoint_with_invalid_sub_returns_401(
     client: AsyncClient,
 ) -> None:
-    access_token = create_access_token(
-        data={"sub": "not-an-integer"}
-    )
+    access_token = create_access_token(data={"sub": "not-an-integer"})
 
     response = await client.get(
         "/api/events/999/seats",
@@ -98,9 +92,7 @@ async def test_protected_endpoint_with_invalid_sub_returns_401(
 async def test_protected_endpoint_with_unknown_user_returns_401(
     client: AsyncClient,
 ) -> None:
-    access_token = create_access_token(
-        data={"sub": "999"}
-    )
+    access_token = create_access_token(data={"sub": "999"})
 
     response = await client.get(
         "/api/events/999/seats",

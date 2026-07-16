@@ -1,31 +1,35 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
+from typing import Annotated
+
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 
+from app.core.config import settings
+from app.core.deps import db_dep
 from app.core.security import (
-    get_password_hash,
-    verify_password,
     create_access_token,
     create_refresh_token,
-    decode_token
+    decode_token,
+    get_password_hash,
+    verify_password,
 )
-from app.core.deps import db_dep
-from app.core.config import settings
-from app.schemas.user import UserCreate, UserResponse
-from app.schemas.token import Token
 from app.models.user import User
+from app.schemas.token import Token
+from app.schemas.user import UserCreate, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
 async def register(user_in: UserCreate, db: db_dep) -> User:
     stmt = select(User).filter(User.email == user_in.email)
     result = await db.execute(stmt)
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
+            detail="User with this email already exists",
         )
 
     hashed_pwd = get_password_hash(user_in.password)
@@ -44,9 +48,12 @@ async def register(user_in: UserCreate, db: db_dep) -> User:
 
 @router.post("/login", response_model=Token)
 async def login(
-        response: Response,
-        db: db_dep,
-        form_data: OAuth2PasswordRequestForm = Depends(),
+    response: Response,
+    db: db_dep,
+    form_data: Annotated[
+        OAuth2PasswordRequestForm,
+        Depends(),
+    ],
 ) -> dict[str, str]:
     stmt = select(User).filter(User.email == form_data.username)
     result = await db.execute(stmt)
@@ -85,19 +92,17 @@ async def login(
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
     }
 
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-        response: Response,
-        refresh_token: str | None = Cookie(default=None)
+    response: Response, refresh_token: str | None = Cookie(default=None)
 ) -> dict[str, str]:
     if not refresh_token:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token missing"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing"
         )
 
     payload = decode_token(refresh_token)
@@ -105,14 +110,13 @@ async def refresh_token(
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token"
+            detail="Invalid or expired refresh token",
         )
 
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token claims"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims"
         )
 
     new_access_token = create_access_token(data={"sub": user_id})
@@ -126,10 +130,7 @@ async def refresh_token(
         secure=settings.ENVIRONMENT == "production",
     )
 
-    return {
-        "access_token": new_access_token,
-        "token_type": "bearer"
-    }
+    return {"access_token": new_access_token, "token_type": "bearer"}
 
 
 @router.post("/logout")

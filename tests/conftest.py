@@ -14,18 +14,13 @@ from app.db.async_session import get_db
 from app.main import app
 from tests.utils.auth import create_auth_headers_for_user
 
-
 if settings.TEST_DATABASE_URL is None:
-    raise RuntimeError(
-        "TEST_DATABASE_URL must be set before running tests"
-    )
+    raise RuntimeError("TEST_DATABASE_URL must be set before running tests")
 
 database_name = settings.TEST_DATABASE_URL.rsplit("/", 1)[-1]
 
 if not database_name.endswith("_test"):
-    raise RuntimeError(
-        "Refusing to run tests against a non-test database"
-    )
+    raise RuntimeError("Refusing to run tests against a non-test database")
 
 
 test_engine = create_async_engine(

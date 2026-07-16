@@ -1,7 +1,9 @@
-from app.db.async_session import Base
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, ForeignKey, DateTime
 from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.async_session import Base
 
 
 class Event(Base):
