@@ -78,3 +78,4 @@ wcwidth==0.8.2
 websockets==16.0
 mypy==2.3.0
 types-passlib==1.7.7.20260211
+ruff==0.15.22
