@@ -4,7 +4,7 @@ from .hold import Hold
 from .payment_attempt import PaymentAttempt
 from .seat import Seat
 from .user import User
-
+from .stripe_webhook_event import StripeWebhookEvent
 __all__ = [
     "Booking",
     "Event",
@@ -12,4 +12,5 @@ __all__ = [
     "PaymentAttempt",
     "Seat",
     "User",
+    "StripeWebhookEvent",
 ]

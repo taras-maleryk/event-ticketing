@@ -46,6 +46,7 @@ async def clean_database() -> AsyncGenerator[None, None]:
             text(
                 """
                 TRUNCATE TABLE
+                    stripe_webhook_events,
                     payment_attempts,
                     bookings,
                     holds,
@@ -64,6 +65,7 @@ async def clean_database() -> AsyncGenerator[None, None]:
             text(
                 """
                 TRUNCATE TABLE
+                    stripe_webhook_events,
                     payment_attempts,
                     bookings,
                     holds,
