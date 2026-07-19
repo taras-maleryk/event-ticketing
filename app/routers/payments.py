@@ -1,0 +1,60 @@
+from fastapi import APIRouter, HTTPException, status
+from stripe import StripeError
+
+from app.core.deps import CurrentUser, db_dep
+from app.schemas.payment import CheckoutSessionResponse
+from app.services import payments as payments_service
+
+router = APIRouter(prefix="/holds", tags=["payments"])
+
+
+@router.post(
+    "/{hold_id}/checkout-session",
+    status_code=status.HTTP_201_CREATED,
+    response_model=CheckoutSessionResponse,
+)
+async def start_checkout(
+    db: db_dep,
+    current_user: CurrentUser,
+    hold_id: int,
+) -> CheckoutSessionResponse:
+    payment_attempt = await payments_service.get_or_create_payment_attempt(
+        db,
+        hold_id=hold_id,
+        user_id=current_user.id,
+    )
+
+    await db.commit()
+
+    try:
+        stripe_session = await payments_service.create_stripe_checkout_session(
+            payment_attempt
+        )
+    except StripeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not create Stripe Checkout Session",
+        ) from exc
+
+    if stripe_session.url is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Stripe Checkout Session has no URL",
+        )
+
+    await payments_service.mark_payment_attempt_pending(
+        db,
+        payment_attempt_id=payment_attempt.id,
+        stripe_checkout_session_id=stripe_session.id,
+    )
+
+    await db.commit()
+
+    if payment_attempt.checkout_expires_at is None:
+        raise RuntimeError("Payment attempt has no checkout expiration")
+
+    return CheckoutSessionResponse(
+        payment_attempt_id=payment_attempt.id,
+        checkout_url=stripe_session.url,
+        expires_at=payment_attempt.checkout_expires_at,
+    )
