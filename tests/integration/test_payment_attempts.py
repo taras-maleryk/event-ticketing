@@ -1,11 +1,18 @@
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums.payment_attempt_status import PaymentAttemptStatus
+from app.models.booking import Booking
+from app.models.hold import Hold
 from app.models.payment_attempt import PaymentAttempt
 from app.models.seat import Seat
 from app.models.user import User
+from app.services.payments import get_or_create_payment_attempt
 from tests.utils.holds import create_hold_for_seat
 from tests.utils.seats import create_event_with_seats
 
@@ -66,3 +73,210 @@ async def test_payment_attempt_stores_price_snapshot(
     await db_session.refresh(payment_attempt)
 
     assert payment_attempt.amount == original_price
+
+
+async def test_create_payment_attempt_for_hold(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_seat = created_seats[0]
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seat["id"],
+    )
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert user is not None
+
+    payment_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=created_hold["id"],
+        user_id=user.id,
+    )
+
+    assert payment_attempt.id is not None
+    assert payment_attempt.hold_id == created_hold["id"]
+    assert payment_attempt.user_id == user.id
+    assert payment_attempt.seat_id == created_seat["id"]
+    assert payment_attempt.amount == created_seat["price"]
+    assert payment_attempt.currency == "uah"
+    assert payment_attempt.status == PaymentAttemptStatus.CREATING
+
+
+async def test_reuses_existing_active_payment_attempt(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seats[0]["id"],
+    )
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert user is not None
+
+    first_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=created_hold["id"],
+        user_id=user.id,
+    )
+
+    second_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=created_hold["id"],
+        user_id=user.id,
+    )
+
+    attempts_count = await db_session.scalar(
+        select(func.count())
+        .select_from(PaymentAttempt)
+        .where(PaymentAttempt.hold_id == created_hold["id"])
+    )
+
+    assert second_attempt.id == first_attempt.id
+    assert attempts_count == 1
+
+
+async def test_payment_attempt_for_another_users_hold_returns_403(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    another_regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seats[0]["id"],
+    )
+
+    another_user = await db_session.scalar(
+        select(User).where(User.email == "another-regular@example.com")
+    )
+
+    assert another_user is not None
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_or_create_payment_attempt(
+            db_session,
+            hold_id=created_hold["id"],
+            user_id=another_user.id,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Hold is not yours"
+
+
+async def test_payment_attempt_for_expired_hold_returns_409(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seats[0]["id"],
+    )
+
+    hold = await db_session.get(Hold, created_hold["id"])
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert hold is not None
+    assert user is not None
+
+    hold.held_from = datetime.now(UTC) - timedelta(minutes=20)
+    hold.held_until = datetime.now(UTC) - timedelta(minutes=5)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_or_create_payment_attempt(
+            db_session,
+            hold_id=hold.id,
+            user_id=user.id,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Hold has expired"
+
+
+async def test_payment_attempt_for_booked_seat_returns_409(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_seat = created_seats[0]
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seat["id"],
+    )
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert user is not None
+
+    booking = Booking(
+        seat_id=created_seat["id"],
+        user_id=user.id,
+        price_paid=created_seat["price"],
+        ticket_token="payment-attempt-booked-seat",
+    )
+
+    db_session.add(booking)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_or_create_payment_attempt(
+            db_session,
+            hold_id=created_hold["id"],
+            user_id=user.id,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Seat is already booked"
