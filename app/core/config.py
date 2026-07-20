@@ -7,6 +7,14 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URL: str
     TEST_DATABASE_URL: str | None = None
     REDIS_URL: str
+
+    STRIPE_SECRET_KEY: str
+    STRIPE_WEBHOOK_SECRET: str
+    STRIPE_CURRENCY: str = "uah"
+    STRIPE_SUCCESS_URL: str
+    STRIPE_CANCEL_URL: str
+    STRIPE_CHECKOUT_EXPIRE_MINUTES: int = 30
+
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     HOLD_FOR_MINUTES: int = 15

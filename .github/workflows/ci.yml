@@ -20,6 +20,12 @@ jobs:
       SYNC_DATABASE_URL: "postgresql+psycopg://postgres:postgres@localhost:5432/event_ticketing_test"
       REDIS_URL: "redis://localhost:6379/0"
       SECRET_KEY: "ci-test-secret-key-not-for-production"
+      STRIPE_SECRET_KEY: "sk_test_ci_placeholder"
+      STRIPE_WEBHOOK_SECRET: "whsec_ci_placeholder"
+      STRIPE_CURRENCY: "uah"
+      STRIPE_SUCCESS_URL: "http://localhost:3000/payments/success?session_id={CHECKOUT_SESSION_ID}"
+      STRIPE_CANCEL_URL: "http://localhost:3000/payments/cancel"
+      STRIPE_CHECKOUT_EXPIRE_MINUTES: "31"
       ENVIRONMENT: "test"
       DB_ECHO: "false"
 
