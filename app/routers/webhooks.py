@@ -9,11 +9,12 @@ from fastapi import (
 )
 from stripe import SignatureVerificationError
 
+from app.core.deps import db_dep
 from app.schemas.webhook import StripeWebhookResponse
 from app.services.stripe_webhooks import (
     construct_stripe_event,
+    process_stripe_event,
 )
-
 
 router = APIRouter(
     prefix="/webhooks",
@@ -27,6 +28,7 @@ router = APIRouter(
 )
 async def stripe_webhook(
     request: Request,
+    db: db_dep,
     stripe_signature: Annotated[
         str | None,
         Header(alias="Stripe-Signature"),
@@ -56,5 +58,14 @@ async def stripe_webhook(
             detail="Invalid Stripe webhook payload",
         ) from exc
 
+    try:
+        await process_stripe_event(
+            db,
+            event=event,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
     return StripeWebhookResponse(received=True)
