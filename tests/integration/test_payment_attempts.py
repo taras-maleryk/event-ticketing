@@ -400,3 +400,49 @@ async def test_checkout_returns_502_when_stripe_fails(
     assert payment_attempt.status == PaymentAttemptStatus.CREATING
     assert payment_attempt.stripe_checkout_session_id is None
     assert payment_attempt.checkout_expires_at is not None
+
+
+async def test_user_can_get_payment_status(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seats[0]["id"],
+    )
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert user is not None
+
+    payment_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=created_hold["id"],
+        user_id=user.id,
+    )
+
+    await db_session.commit()
+
+    response = await client.get(
+        f"/api/payments/{payment_attempt.id}",
+        headers=regular_user_headers,
+    )
+
+    assert response.status_code == 200
+
+    response_data = response.json()
+
+    assert response_data["payment_attempt_id"] == (payment_attempt.id)
+    assert response_data["status"] == "creating"
+    assert response_data["amount"] == payment_attempt.amount
+    assert response_data["currency"] == "uah"

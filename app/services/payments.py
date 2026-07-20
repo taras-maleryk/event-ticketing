@@ -173,3 +173,25 @@ async def mark_payment_attempt_pending(
     await db.flush()
 
     return payment_attempt
+
+
+async def get_payment_attempt_for_user(
+    db: AsyncSession,
+    *,
+    payment_attempt_id: int,
+    user_id: int,
+) -> PaymentAttempt:
+    payment_attempt = await db.scalar(
+        select(PaymentAttempt).where(
+            PaymentAttempt.id == payment_attempt_id,
+            PaymentAttempt.user_id == user_id,
+        )
+    )
+
+    if payment_attempt is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment attempt not found",
+        )
+
+    return payment_attempt

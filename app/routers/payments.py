@@ -2,14 +2,16 @@ from fastapi import APIRouter, HTTPException, status
 from stripe import StripeError
 
 from app.core.deps import CurrentUser, db_dep
-from app.schemas.payment import CheckoutSessionResponse
+from app.schemas.payment import CheckoutSessionResponse, PaymentStatusResponse
 from app.services import payments as payments_service
 
-router = APIRouter(prefix="/holds", tags=["payments"])
+router = APIRouter(
+    tags=["payments"],
+)
 
 
 @router.post(
-    "/{hold_id}/checkout-session",
+    "/holds/{hold_id}/checkout-session",
     status_code=status.HTTP_201_CREATED,
     response_model=CheckoutSessionResponse,
 )
@@ -57,4 +59,28 @@ async def start_checkout(
         payment_attempt_id=payment_attempt.id,
         checkout_url=stripe_session.url,
         expires_at=payment_attempt.checkout_expires_at,
+    )
+
+
+@router.get(
+    "/payments/{payment_attempt_id}",
+    response_model=PaymentStatusResponse,
+)
+async def get_payment_status(
+    db: db_dep,
+    current_user: CurrentUser,
+    payment_attempt_id: int,
+) -> PaymentStatusResponse:
+    payment_attempt = await payments_service.get_payment_attempt_for_user(
+        db,
+        payment_attempt_id=payment_attempt_id,
+        user_id=current_user.id,
+    )
+
+    return PaymentStatusResponse(
+        payment_attempt_id=payment_attempt.id,
+        status=payment_attempt.status,
+        amount=payment_attempt.amount,
+        currency=payment_attempt.currency,
+        checkout_expires_at=(payment_attempt.checkout_expires_at),
     )
