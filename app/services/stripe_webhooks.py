@@ -28,54 +28,30 @@ def construct_stripe_event(
     )
 
 
-async def process_stripe_event(
-    db: AsyncSession,
-    *,
-    event: Event,
-) -> None:
-    if event.type != "checkout.session.completed":
-        return
-
-    checkout_session = cast(
-        StripeCheckoutSession,
-        event.data.object,
-    )
-
-    await process_completed_checkout(
-        db,
-        event=event,
-        checkout_session=checkout_session,
-    )
-
-
-async def process_completed_checkout(
-    db: AsyncSession,
-    *,
-    event: Event,
+def get_payment_attempt_id(
     checkout_session: StripeCheckoutSession,
-) -> None:
-    if checkout_session.payment_status != "paid":
-        return
-
+) -> int:
     metadata = checkout_session.metadata
 
     if metadata is None:
-        raise RuntimeError(
-            "Stripe Checkout Session has no metadata"
-        )
+        raise RuntimeError("Stripe Checkout Session has no metadata")
 
-    payment_attempt_id_value = metadata.get(
-        "payment_attempt_id"
-    )
+    payment_attempt_id_value = metadata.get("payment_attempt_id")
 
     if payment_attempt_id_value is None:
         raise RuntimeError("Stripe Checkout Session has no payment_attempt_id")
 
     try:
-        payment_attempt_id = int(payment_attempt_id_value)
+        return int(payment_attempt_id_value)
     except ValueError as exc:
         raise RuntimeError("Invalid payment_attempt_id in Stripe metadata") from exc
 
+
+async def register_stripe_event(
+    db: AsyncSession,
+    *,
+    event: Event,
+) -> bool:
     insert_event_statement = (
         insert(StripeWebhookEvent)
         .values(
@@ -92,7 +68,57 @@ async def process_completed_checkout(
 
     webhook_event_id = await db.scalar(insert_event_statement)
 
-    if webhook_event_id is None:
+    return webhook_event_id is not None
+
+
+async def process_stripe_event(
+    db: AsyncSession,
+    *,
+    event: Event,
+) -> None:
+    if event.type == "checkout.session.completed":
+        checkout_session = cast(
+            StripeCheckoutSession,
+            event.data.object,
+        )
+
+        await process_completed_checkout(
+            db,
+            event=event,
+            checkout_session=checkout_session,
+        )
+        return
+
+    if event.type == "checkout.session.expired":
+        checkout_session = cast(
+            StripeCheckoutSession,
+            event.data.object,
+        )
+
+        await process_expired_checkout(
+            db,
+            event=event,
+            checkout_session=checkout_session,
+        )
+
+
+async def process_completed_checkout(
+    db: AsyncSession,
+    *,
+    event: Event,
+    checkout_session: StripeCheckoutSession,
+) -> None:
+    if checkout_session.payment_status != "paid":
+        return
+
+    payment_attempt_id = get_payment_attempt_id(checkout_session)
+
+    event_registered = await register_stripe_event(
+        db,
+        event=event,
+    )
+
+    if not event_registered:
         return
 
     payment_attempt = await db.scalar(
@@ -107,8 +133,12 @@ async def process_completed_checkout(
     if payment_attempt.status == PaymentAttemptStatus.SUCCEEDED:
         return
 
-    if payment_attempt.stripe_checkout_session_id != checkout_session.id:
+    existing_session_id = payment_attempt.stripe_checkout_session_id
+
+    if existing_session_id is not None and existing_session_id != checkout_session.id:
         raise RuntimeError("Stripe Checkout Session does not match the payment attempt")
+
+    payment_attempt.stripe_checkout_session_id = checkout_session.id
 
     if checkout_session.amount_total is None:
         raise RuntimeError("Stripe Checkout Session has no amount_total")
@@ -141,6 +171,69 @@ async def process_completed_checkout(
     db.add(booking)
 
     payment_attempt.status = PaymentAttemptStatus.SUCCEEDED
+
+    if payment_attempt.hold_id is not None:
+        hold = await db.get(
+            Hold,
+            payment_attempt.hold_id,
+        )
+
+        if hold is not None:
+            await db.delete(hold)
+
+    await db.flush()
+
+
+async def process_expired_checkout(
+    db: AsyncSession,
+    *,
+    event: Event,
+    checkout_session: StripeCheckoutSession,
+) -> None:
+    payment_attempt_id = get_payment_attempt_id(checkout_session)
+
+    event_registered = await register_stripe_event(
+        db,
+        event=event,
+    )
+
+    if not event_registered:
+        return
+
+    payment_attempt = await db.scalar(
+        select(PaymentAttempt)
+        .where(PaymentAttempt.id == payment_attempt_id)
+        .with_for_update()
+    )
+
+    if payment_attempt is None:
+        raise RuntimeError("Payment attempt not found")
+
+    existing_session_id = payment_attempt.stripe_checkout_session_id
+
+    if existing_session_id is not None and existing_session_id != checkout_session.id:
+        raise RuntimeError("Stripe Checkout Session does not match the payment attempt")
+
+    payment_attempt.stripe_checkout_session_id = checkout_session.id
+
+    if payment_attempt.status in {
+        PaymentAttemptStatus.SUCCEEDED,
+        PaymentAttemptStatus.REQUIRES_REFUND,
+    }:
+        return
+
+    if payment_attempt.status == PaymentAttemptStatus.EXPIRED:
+        return
+
+    if payment_attempt.status not in {
+        PaymentAttemptStatus.CREATING,
+        PaymentAttemptStatus.PENDING,
+    }:
+        raise RuntimeError(
+            f"Payment attempt cannot be expired from status {payment_attempt.status}"
+        )
+
+    payment_attempt.status = PaymentAttemptStatus.EXPIRED
 
     if payment_attempt.hold_id is not None:
         hold = await db.get(
