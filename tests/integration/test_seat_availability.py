@@ -83,6 +83,7 @@ async def test_get_event_seats_returns_held_statuses(
 
 
 async def test_get_event_seats_returns_booked_statuses(
+    db_session: AsyncSession,
     client: AsyncClient,
     organizer_headers: dict[str, str],
     regular_user_headers: dict[str, str],
@@ -103,8 +104,7 @@ async def test_get_event_seats_returns_booked_statuses(
     )
 
     await create_booking_for_hold(
-        client,
-        regular_user_headers,
+        db_session,
         created_hold["id"],
     )
 
