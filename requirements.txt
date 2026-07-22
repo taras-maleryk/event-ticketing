@@ -80,3 +80,4 @@ mypy==2.3.0
 types-passlib==1.7.7.20260211
 ruff==0.15.22
 stripe==14.4.0
+structlog==26.1.0
