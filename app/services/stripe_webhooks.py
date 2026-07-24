@@ -1,19 +1,36 @@
 import secrets
-from typing import cast
+from dataclasses import dataclass
+from typing import Literal, cast
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stripe import Event
-from stripe.checkout import Session as StripeCheckoutSession
+from stripe.checkout import (
+    Session as StripeCheckoutSession,
+)
 
 from app.core.config import settings
 from app.core.stripe_client import stripe_client
-from app.enums.payment_attempt_status import PaymentAttemptStatus
+from app.enums.payment_attempt_status import (
+    PaymentAttemptStatus,
+)
 from app.models.booking import Booking
 from app.models.hold import Hold
 from app.models.payment_attempt import PaymentAttempt
-from app.models.stripe_webhook_event import StripeWebhookEvent
+from app.models.stripe_webhook_event import (
+    StripeWebhookEvent,
+)
+
+logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class StripeEventOutcome:
+    event_name: str
+    level: Literal["info", "warning"]
+    fields: dict[str, object]
 
 
 def construct_stripe_event(
@@ -47,6 +64,27 @@ def get_payment_attempt_id(
         raise RuntimeError("Invalid payment_attempt_id in Stripe metadata") from exc
 
 
+def get_checkout_log_context(
+    checkout_session: StripeCheckoutSession,
+) -> dict[str, object]:
+    metadata = checkout_session.metadata
+
+    if metadata is None:
+        return {}
+
+    correlation_id = metadata.get("correlation_id")
+
+    if not isinstance(correlation_id, str):
+        return {}
+
+    if not correlation_id:
+        return {}
+
+    return {
+        "correlation_id": correlation_id,
+    }
+
+
 async def register_stripe_event(
     db: AsyncSession,
     *,
@@ -75,19 +113,26 @@ async def process_stripe_event(
     db: AsyncSession,
     *,
     event: Event,
-) -> None:
+) -> StripeEventOutcome | None:
     if event.type == "checkout.session.completed":
         checkout_session = cast(
             StripeCheckoutSession,
             event.data.object,
         )
 
-        await process_completed_checkout(
+        logger.info(
+            "stripe_webhook_received",
+            stripe_event_id=event.id,
+            stripe_event_type=event.type,
+            stripe_checkout_session_id=(checkout_session.id),
+            **get_checkout_log_context(checkout_session),
+        )
+
+        return await process_completed_checkout(
             db,
             event=event,
             checkout_session=checkout_session,
         )
-        return
 
     if event.type == "checkout.session.expired":
         checkout_session = cast(
@@ -95,11 +140,27 @@ async def process_stripe_event(
             event.data.object,
         )
 
-        await process_expired_checkout(
+        logger.info(
+            "stripe_webhook_received",
+            stripe_event_id=event.id,
+            stripe_event_type=event.type,
+            stripe_checkout_session_id=(checkout_session.id),
+            **get_checkout_log_context(checkout_session),
+        )
+
+        return await process_expired_checkout(
             db,
             event=event,
             checkout_session=checkout_session,
         )
+
+    logger.info(
+        "stripe_webhook_ignored",
+        stripe_event_id=event.id,
+        stripe_event_type=event.type,
+    )
+
+    return None
 
 
 async def process_completed_checkout(
@@ -107,9 +168,18 @@ async def process_completed_checkout(
     *,
     event: Event,
     checkout_session: StripeCheckoutSession,
-) -> None:
+) -> StripeEventOutcome | None:
+    log_context = get_checkout_log_context(checkout_session)
+
     if checkout_session.payment_status != "paid":
-        return
+        logger.info(
+            "stripe_checkout_completion_ignored",
+            stripe_event_id=event.id,
+            stripe_checkout_session_id=(checkout_session.id),
+            payment_status=(checkout_session.payment_status),
+            **log_context,
+        )
+        return None
 
     payment_attempt_id = get_payment_attempt_id(checkout_session)
 
@@ -119,7 +189,15 @@ async def process_completed_checkout(
     )
 
     if not event_registered:
-        return
+        logger.info(
+            "stripe_webhook_duplicate",
+            stripe_event_id=event.id,
+            stripe_event_type=event.type,
+            stripe_checkout_session_id=(checkout_session.id),
+            payment_attempt_id=payment_attempt_id,
+            **log_context,
+        )
+        return None
 
     payment_attempt = await db.scalar(
         select(PaymentAttempt)
@@ -131,7 +209,14 @@ async def process_completed_checkout(
         raise RuntimeError("Payment attempt not found")
 
     if payment_attempt.status == PaymentAttemptStatus.SUCCEEDED:
-        return
+        logger.info(
+            "payment_already_succeeded",
+            payment_attempt_id=payment_attempt.id,
+            stripe_event_id=event.id,
+            stripe_checkout_session_id=(checkout_session.id),
+            **log_context,
+        )
+        return None
 
     existing_session_id = payment_attempt.stripe_checkout_session_id
 
@@ -158,8 +243,20 @@ async def process_completed_checkout(
 
     if existing_booking is not None:
         payment_attempt.status = PaymentAttemptStatus.REQUIRES_REFUND
+
         await db.flush()
-        return
+
+        return StripeEventOutcome(
+            event_name="payment_requires_refund",
+            level="warning",
+            fields={
+                "payment_attempt_id": (payment_attempt.id),
+                "booking_id": existing_booking.id,
+                "stripe_event_id": event.id,
+                "stripe_checkout_session_id": (checkout_session.id),
+                **log_context,
+            },
+        )
 
     booking = Booking(
         seat_id=payment_attempt.seat_id,
@@ -183,13 +280,31 @@ async def process_completed_checkout(
 
     await db.flush()
 
+    return StripeEventOutcome(
+        event_name="payment_succeeded",
+        level="info",
+        fields={
+            "payment_attempt_id": payment_attempt.id,
+            "booking_id": booking.id,
+            "stripe_event_id": event.id,
+            "stripe_checkout_session_id": (checkout_session.id),
+            "seat_id": payment_attempt.seat_id,
+            "user_id": payment_attempt.user_id,
+            "amount": payment_attempt.amount,
+            "currency": payment_attempt.currency,
+            **log_context,
+        },
+    )
+
 
 async def process_expired_checkout(
     db: AsyncSession,
     *,
     event: Event,
     checkout_session: StripeCheckoutSession,
-) -> None:
+) -> StripeEventOutcome | None:
+    log_context = get_checkout_log_context(checkout_session)
+
     payment_attempt_id = get_payment_attempt_id(checkout_session)
 
     event_registered = await register_stripe_event(
@@ -198,7 +313,15 @@ async def process_expired_checkout(
     )
 
     if not event_registered:
-        return
+        logger.info(
+            "stripe_webhook_duplicate",
+            stripe_event_id=event.id,
+            stripe_event_type=event.type,
+            stripe_checkout_session_id=(checkout_session.id),
+            payment_attempt_id=payment_attempt_id,
+            **log_context,
+        )
+        return None
 
     payment_attempt = await db.scalar(
         select(PaymentAttempt)
@@ -220,10 +343,25 @@ async def process_expired_checkout(
         PaymentAttemptStatus.SUCCEEDED,
         PaymentAttemptStatus.REQUIRES_REFUND,
     }:
-        return
+        logger.info(
+            "stripe_checkout_expiration_ignored",
+            payment_attempt_id=payment_attempt.id,
+            payment_status=(payment_attempt.status.value),
+            stripe_event_id=event.id,
+            stripe_checkout_session_id=(checkout_session.id),
+            **log_context,
+        )
+        return None
 
     if payment_attempt.status == PaymentAttemptStatus.EXPIRED:
-        return
+        logger.info(
+            "payment_already_expired",
+            payment_attempt_id=payment_attempt.id,
+            stripe_event_id=event.id,
+            stripe_checkout_session_id=(checkout_session.id),
+            **log_context,
+        )
+        return None
 
     if payment_attempt.status not in {
         PaymentAttemptStatus.CREATING,
@@ -245,3 +383,16 @@ async def process_expired_checkout(
             await db.delete(hold)
 
     await db.flush()
+
+    return StripeEventOutcome(
+        event_name="payment_expired",
+        level="info",
+        fields={
+            "payment_attempt_id": payment_attempt.id,
+            "stripe_event_id": event.id,
+            "stripe_checkout_session_id": (checkout_session.id),
+            "seat_id": payment_attempt.seat_id,
+            "user_id": payment_attempt.user_id,
+            **log_context,
+        },
+    )

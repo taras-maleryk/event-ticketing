@@ -1,12 +1,23 @@
 from fastapi import APIRouter, FastAPI
 
+from app.core.config import settings
+from app.core.logging import configure_logging
+from app.middleware.request_logging import (
+    RequestLoggingMiddleware,
+)
 from app.routers.auth import router as auth_router
 from app.routers.events import router as events_router
 from app.routers.payments import router as payments_router
 from app.routers.seats import router as seats_router
 from app.routers.webhooks import router as webhooks_router
 
+configure_logging(
+    log_level=settings.LOG_LEVEL,
+    log_format=settings.LOG_FORMAT,
+)
 app = FastAPI()
+
+app.add_middleware(RequestLoggingMiddleware)
 
 
 @app.get("/")

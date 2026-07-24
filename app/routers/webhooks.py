@@ -1,5 +1,6 @@
 from typing import Annotated
 
+import structlog
 from fastapi import (
     APIRouter,
     Header,
@@ -21,6 +22,8 @@ router = APIRouter(
     tags=["webhooks"],
 )
 
+logger = structlog.get_logger(__name__)
+
 
 @router.post(
     "/stripe",
@@ -35,6 +38,7 @@ async def stripe_webhook(
     ] = None,
 ) -> StripeWebhookResponse:
     if stripe_signature is None:
+        logger.warning("stripe_webhook_missing_signature")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing Stripe-Signature header",
@@ -48,18 +52,20 @@ async def stripe_webhook(
             signature=stripe_signature,
         )
     except SignatureVerificationError as exc:
+        logger.warning("stripe_webhook_invalid_signature")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid Stripe webhook signature",
         ) from exc
     except ValueError as exc:
+        logger.warning("stripe_webhook_invalid_payload")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid Stripe webhook payload",
         ) from exc
 
     try:
-        await process_stripe_event(
+        outcome = await process_stripe_event(
             db,
             event=event,
         )
@@ -67,5 +73,17 @@ async def stripe_webhook(
     except Exception:
         await db.rollback()
         raise
+
+    if outcome is not None:
+        if outcome.level == "warning":
+            logger.warning(
+                outcome.event_name,
+                **outcome.fields,
+            )
+        else:
+            logger.info(
+                outcome.event_name,
+                **outcome.fields,
+            )
 
     return StripeWebhookResponse(received=True)

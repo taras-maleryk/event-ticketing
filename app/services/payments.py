@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,8 @@ from app.models.booking import Booking
 from app.models.hold import Hold
 from app.models.payment_attempt import PaymentAttempt
 from app.models.seat import Seat
+
+logger = structlog.get_logger(__name__)
 
 
 async def get_or_create_payment_attempt(
@@ -109,6 +112,18 @@ async def create_stripe_checkout_session(
     if payment_attempt.checkout_expires_at is None:
         raise RuntimeError("Payment attempt has no checkout expiration")
 
+    metadata = {
+        "payment_attempt_id": str(payment_attempt.id),
+        "hold_id": str(payment_attempt.hold_id),
+        "user_id": str(payment_attempt.user_id),
+        "seat_id": str(payment_attempt.seat_id),
+    }
+
+    correlation_id = structlog.contextvars.get_contextvars().get("correlation_id")
+
+    if isinstance(correlation_id, str) and correlation_id:
+        metadata["correlation_id"] = correlation_id
+
     params: SessionCreateParams = {
         "mode": "payment",
         "payment_method_types": ["card"],
@@ -128,20 +143,24 @@ async def create_stripe_checkout_session(
         "cancel_url": settings.STRIPE_CANCEL_URL,
         "expires_at": int(payment_attempt.checkout_expires_at.timestamp()),
         "client_reference_id": str(payment_attempt.id),
-        "metadata": {
-            "payment_attempt_id": str(payment_attempt.id),
-            "hold_id": str(payment_attempt.hold_id),
-            "user_id": str(payment_attempt.user_id),
-            "seat_id": str(payment_attempt.seat_id),
-        },
+        "metadata": metadata,
     }
 
-    return await stripe_client.v1.checkout.sessions.create_async(
+    checkout_session = await stripe_client.v1.checkout.sessions.create_async(
         params=params,
         options={
             "idempotency_key": (f"payment-attempt:{payment_attempt.id}"),
         },
     )
+
+    logger.info(
+        "stripe_checkout_session_created",
+        payment_attempt_id=payment_attempt.id,
+        stripe_checkout_session_id=checkout_session.id,
+        hold_id=payment_attempt.hold_id,
+    )
+
+    return checkout_session
 
 
 async def mark_payment_attempt_pending(
