@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,6 +66,76 @@ async def test_create_event_as_organizer_returns_201(
     assert created_event.venue == "SomeVenue"
     assert created_event.description == "SomeDescription"
     assert created_event.organizer_id == response_data["organizer_id"]
+
+
+async def test_create_event_trims_required_text(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    response = await client.post(
+        "/api/events",
+        json=make_event_payload(
+            name="  Trimmed Event  ",
+            venue="  Main Hall  ",
+        ),
+        headers=organizer_headers,
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 201
+    assert response_data["name"] == "Trimmed Event"
+    assert response_data["venue"] == "Main Hall"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("name", "   "),
+        ("venue", "\t"),
+    ],
+)
+async def test_create_event_rejects_blank_required_text(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    field: str,
+    value: str,
+) -> None:
+    payload = make_event_payload()
+    payload[field] = value
+
+    response = await client.post(
+        "/api/events",
+        json=payload,
+        headers=organizer_headers,
+    )
+
+    assert response.status_code == 422
+
+
+async def test_create_event_rejects_naive_datetime(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    payload = make_event_payload()
+    payload["date"] = (datetime.now() + timedelta(days=1)).isoformat()
+
+    response = await client.post(
+        "/api/events",
+        json=payload,
+        headers=organizer_headers,
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_events_rejects_naive_date_filter(client: AsyncClient) -> None:
+    response = await client.get(
+        "/api/events",
+        params={"date_from": "2026-08-26T12:00:00"},
+    )
+
+    assert response.status_code == 422
 
 
 async def test_get_event_by_id_returns_event(
@@ -284,6 +355,66 @@ async def test_update_own_event_as_organizer_returns_200(
     assert updated_event.venue == "Original Venue"
     assert updated_event.description == "Updated Description"
     assert updated_event.organizer_id == created_event["organizer_id"]
+
+
+@pytest.mark.parametrize("field", ["name", "venue", "date"])
+async def test_update_event_rejects_null_required_fields(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    field: str,
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+    )
+
+    response = await client.patch(
+        f"/api/events/{created_event['id']}",
+        json={field: None},
+        headers=organizer_headers,
+    )
+
+    assert response.status_code == 422
+
+
+async def test_update_event_trims_required_text(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+    )
+
+    response = await client.patch(
+        f"/api/events/{created_event['id']}",
+        json={"name": "  Updated Event  ", "venue": "  Updated Venue  "},
+        headers=organizer_headers,
+    )
+
+    response_data = response.json()
+
+    assert response.status_code == 200
+    assert response_data["name"] == "Updated Event"
+    assert response_data["venue"] == "Updated Venue"
+
+
+async def test_update_event_rejects_naive_datetime(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+    )
+
+    response = await client.patch(
+        f"/api/events/{created_event['id']}",
+        json={"date": "2026-08-27T12:00:00"},
+        headers=organizer_headers,
+    )
+
+    assert response.status_code == 422
 
 
 async def test_update_missing_event_as_organizer_returns_404(
