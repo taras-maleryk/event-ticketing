@@ -1,3 +1,4 @@
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -140,6 +141,86 @@ async def test_create_event_seats_as_owner_organizer_returns_201(
     assert seats[0].number == 1
     assert seats[-1].row == 2
     assert seats[-1].number == 3
+
+
+@pytest.mark.parametrize(
+    "row_prices",
+    [
+        [
+            {"row": 1, "price": 1000},
+            {"row": 1, "price": 1500},
+        ],
+        [
+            {"row": 1, "price": 1000},
+            {"row": 2, "price": 1500},
+            {"row": 3, "price": 2000},
+        ],
+    ],
+    ids=["duplicate-row", "row-out-of-bounds"],
+)
+async def test_create_event_seats_rejects_invalid_row_prices(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    row_prices: list[dict],
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+    )
+
+    response = await client.post(
+        f"/api/events/{created_event['id']}/seats",
+        json=make_hall_config_payload(row_prices=row_prices),
+        headers=organizer_headers,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "excluded_seats",
+    [
+        [
+            {"row": 1, "excluded_numbers": [1]},
+            {"row": 1, "excluded_numbers": [2]},
+        ],
+        [{"row": 1, "excluded_numbers": [1, 1]}],
+        [{"row": 1, "excluded_numbers": [0]}],
+        [{"row": 1, "excluded_numbers": [-1]}],
+        [{"row": 3, "excluded_numbers": [1]}],
+        [{"row": 1, "excluded_numbers": [4]}],
+        [
+            {"row": 1, "excluded_numbers": [1, 2, 3]},
+            {"row": 2, "excluded_numbers": [1, 2, 3]},
+        ],
+    ],
+    ids=[
+        "duplicate-row",
+        "duplicate-seat",
+        "zero-seat",
+        "negative-seat",
+        "row-out-of-bounds",
+        "seat-out-of-bounds",
+        "all-seats-excluded",
+    ],
+)
+async def test_create_event_seats_rejects_invalid_exclusions(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    excluded_seats: list[dict],
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+    )
+
+    response = await client.post(
+        f"/api/events/{created_event['id']}/seats",
+        json=make_hall_config_payload(excluded_seats=excluded_seats),
+        headers=organizer_headers,
+    )
+
+    assert response.status_code == 422
 
 
 async def test_create_event_seats_twice_returns_409(
