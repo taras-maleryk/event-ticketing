@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import uuid4
 
@@ -118,7 +119,9 @@ async def login(
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    response: Response, refresh_token: str | None = Cookie(default=None)
+    response: Response,
+    db: db_dep,
+    refresh_token: str | None = Cookie(default=None),
 ) -> dict[str, str]:
     if not refresh_token:
         raise HTTPException(
@@ -134,12 +137,53 @@ async def refresh_token(
         )
 
     user_id = payload.get("sub")
-    if not user_id:
+    session_id = payload.get("sid")
+    token_jti = payload.get("jti")
+    if not user_id or not session_id or not token_jti:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims"
         )
 
+    try:
+        user_id_int = int(user_id)
+        session_id_int = int(session_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims"
+        ) from None
+
+    stmt = (
+        select(RefreshSession)
+        .where(RefreshSession.id == session_id_int)
+        .with_for_update()
+    )
+    result = await db.execute(stmt)
+    refresh_session = result.scalar_one_or_none()
+    now = datetime.now(UTC)
+
+    if (
+        refresh_session is None
+        or refresh_session.user_id != user_id_int
+        or refresh_session.revoked_at is not None
+        or refresh_session.expires_at <= now
+        or refresh_session.current_jti != token_jti
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh session",
+        )
+
+    new_jti = str(uuid4())
+    refresh_session.current_jti = new_jti
     new_access_token = create_access_token(data={"sub": user_id})
+    new_refresh_token = create_refresh_token(
+        data={"sub": user_id, "sid": session_id, "jti": new_jti},
+        expires_at=refresh_session.expires_at,
+    )
+    await db.commit()
+
+    is_secure = settings.ENVIRONMENT == "production"
+    refresh_max_age = max(0, int((refresh_session.expires_at - now).total_seconds()))
 
     response.set_cookie(
         key="access_token",
@@ -147,10 +191,23 @@ async def refresh_token(
         httponly=True,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
+        secure=is_secure,
     )
 
-    return {"access_token": new_access_token, "token_type": "bearer"}
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        max_age=refresh_max_age,
+        samesite="lax",
+        secure=is_secure,
+    )
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+    }
 
 
 @router.post("/logout")

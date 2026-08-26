@@ -236,6 +236,7 @@ async def test_login_with_incorrect_password_returns_401(
 
 async def test_refresh_token_successfully(
     client: AsyncClient,
+    db_session: AsyncSession,
 ) -> None:
     register_payload = {
         "name": "Tom Norris",
@@ -263,6 +264,10 @@ async def test_refresh_token_successfully(
 
     assert login_response.status_code == 200
     assert "refresh_token" in login_response.cookies
+    original_refresh_token = login_response.json()["refresh_token"]
+    original_payload = decode_token(original_refresh_token)
+
+    assert original_payload is not None
 
     refresh_response = await client.post("/api/auth/refresh")
 
@@ -272,7 +277,26 @@ async def test_refresh_token_successfully(
 
     assert refresh_data["access_token"] is not None
     assert refresh_data["token_type"] == "bearer"
+    assert refresh_data["refresh_token"] != original_refresh_token
     assert "access_token" in refresh_response.cookies
+    assert "refresh_token" in refresh_response.cookies
+
+    rotated_payload = decode_token(refresh_data["refresh_token"])
+
+    assert rotated_payload is not None
+    assert rotated_payload["sid"] == original_payload["sid"]
+    assert rotated_payload["jti"] != original_payload["jti"]
+
+    refresh_session = await db_session.get(RefreshSession, int(rotated_payload["sid"]))
+
+    assert refresh_session is not None
+    assert refresh_session.current_jti == rotated_payload["jti"]
+
+    client.cookies.set("refresh_token", original_refresh_token)
+    replay_response = await client.post("/api/auth/refresh")
+
+    assert replay_response.status_code == 401
+    assert replay_response.json()["detail"] == "Invalid or expired refresh session"
 
 
 async def test_refresh_token_without_cookie_returns_401(
