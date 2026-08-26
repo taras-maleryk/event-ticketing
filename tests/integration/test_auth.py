@@ -2,7 +2,12 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import create_access_token, create_refresh_token
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+)
+from app.models.refresh_session import RefreshSession
 from app.models.user import User
 
 
@@ -142,6 +147,7 @@ async def test_register_duplicate_email(
 
 async def test_login_user_successfully(
     client: AsyncClient,
+    db_session: AsyncSession,
 ) -> None:
     register_payload = {
         "name": "Tom Norris",
@@ -177,6 +183,19 @@ async def test_login_user_successfully(
 
     assert "access_token" in login_response.cookies
     assert "refresh_token" in login_response.cookies
+
+    refresh_payload = decode_token(login_data["refresh_token"])
+
+    assert refresh_payload is not None
+    assert refresh_payload["type"] == "refresh"
+    assert refresh_payload["sub"] == str(register_response.json()["id"])
+
+    refresh_session = await db_session.get(RefreshSession, int(refresh_payload["sid"]))
+
+    assert refresh_session is not None
+    assert refresh_session.user_id == int(refresh_payload["sub"])
+    assert refresh_session.current_jti == refresh_payload["jti"]
+    assert refresh_session.revoked_at is None
 
 
 async def test_login_with_incorrect_password_returns_401(

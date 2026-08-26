@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -11,8 +12,10 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     get_password_hash,
+    get_refresh_token_expiration,
     verify_password,
 )
+from app.models.refresh_session import RefreshSession
 from app.models.user import User
 from app.schemas.token import Token
 from app.schemas.user import UserCreate, UserResponse
@@ -67,7 +70,24 @@ async def login(
         )
 
     access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    refresh_expires_at = get_refresh_token_expiration()
+    refresh_session = RefreshSession(
+        user_id=user.id,
+        current_jti=str(uuid4()),
+        expires_at=refresh_expires_at,
+    )
+    db.add(refresh_session)
+    await db.flush()
+
+    refresh_token = create_refresh_token(
+        data={
+            "sub": str(user.id),
+            "sid": str(refresh_session.id),
+            "jti": refresh_session.current_jti,
+        },
+        expires_at=refresh_expires_at,
+    )
+    await db.commit()
 
     is_secure = settings.ENVIRONMENT == "production"
 
