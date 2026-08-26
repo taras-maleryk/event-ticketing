@@ -421,6 +421,71 @@ async def test_checkout_returns_502_when_stripe_fails(
     assert payment_attempt.checkout_expires_at is not None
 
 
+async def test_checkout_retry_reuses_attempt_after_stripe_failure(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seats[0]["id"],
+    )
+
+    attempted_payment_ids: list[int] = []
+
+    async def fake_create_stripe_checkout_session(
+        payment_attempt: PaymentAttempt,
+    ) -> FakeStripeCheckoutSession:
+        attempted_payment_ids.append(payment_attempt.id)
+
+        if len(attempted_payment_ids) == 1:
+            raise StripeError("Stripe is temporarily unavailable")
+
+        return FakeStripeCheckoutSession(
+            id="cs_test_checkout_retry",
+            url="https://checkout.stripe.com/c/pay/cs_test_checkout_retry",
+        )
+
+    monkeypatch.setattr(
+        payments_service,
+        "create_stripe_checkout_session",
+        fake_create_stripe_checkout_session,
+    )
+
+    checkout_url = f"/api/holds/{created_hold['id']}/checkout-session"
+
+    first_response = await client.post(
+        checkout_url,
+        headers=regular_user_headers,
+    )
+    second_response = await client.post(
+        checkout_url,
+        headers=regular_user_headers,
+    )
+
+    assert first_response.status_code == 502
+    assert second_response.status_code == 201
+    assert attempted_payment_ids[0] == attempted_payment_ids[1]
+
+    payment_attempts = (
+        await db_session.scalars(
+            select(PaymentAttempt).where(PaymentAttempt.hold_id == created_hold["id"])
+        )
+    ).all()
+
+    assert len(payment_attempts) == 1
+    assert payment_attempts[0].status == PaymentAttemptStatus.PENDING
+    assert payment_attempts[0].stripe_checkout_session_id == "cs_test_checkout_retry"
+
+
 async def test_user_can_get_payment_status(
     client: AsyncClient,
     organizer_headers: dict[str, str],
