@@ -1,4 +1,6 @@
+from datetime import UTC, datetime
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -11,8 +13,10 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     get_password_hash,
+    get_refresh_token_expiration,
     verify_password,
 )
+from app.models.refresh_session import RefreshSession
 from app.models.user import User
 from app.schemas.token import Token
 from app.schemas.user import UserCreate, UserResponse
@@ -67,7 +71,24 @@ async def login(
         )
 
     access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    refresh_expires_at = get_refresh_token_expiration()
+    refresh_session = RefreshSession(
+        user_id=user.id,
+        current_jti=str(uuid4()),
+        expires_at=refresh_expires_at,
+    )
+    db.add(refresh_session)
+    await db.flush()
+
+    refresh_token = create_refresh_token(
+        data={
+            "sub": str(user.id),
+            "sid": str(refresh_session.id),
+            "jti": refresh_session.current_jti,
+        },
+        expires_at=refresh_expires_at,
+    )
+    await db.commit()
 
     is_secure = settings.ENVIRONMENT == "production"
 
@@ -98,7 +119,9 @@ async def login(
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    response: Response, refresh_token: str | None = Cookie(default=None)
+    response: Response,
+    db: db_dep,
+    refresh_token: str | None = Cookie(default=None),
 ) -> dict[str, str]:
     if not refresh_token:
         raise HTTPException(
@@ -114,12 +137,53 @@ async def refresh_token(
         )
 
     user_id = payload.get("sub")
-    if not user_id:
+    session_id = payload.get("sid")
+    token_jti = payload.get("jti")
+    if not user_id or not session_id or not token_jti:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims"
         )
 
+    try:
+        user_id_int = int(user_id)
+        session_id_int = int(session_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims"
+        ) from None
+
+    stmt = (
+        select(RefreshSession)
+        .where(RefreshSession.id == session_id_int)
+        .with_for_update()
+    )
+    result = await db.execute(stmt)
+    refresh_session = result.scalar_one_or_none()
+    now = datetime.now(UTC)
+
+    if (
+        refresh_session is None
+        or refresh_session.user_id != user_id_int
+        or refresh_session.revoked_at is not None
+        or refresh_session.expires_at <= now
+        or refresh_session.current_jti != token_jti
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh session",
+        )
+
+    new_jti = str(uuid4())
+    refresh_session.current_jti = new_jti
     new_access_token = create_access_token(data={"sub": user_id})
+    new_refresh_token = create_refresh_token(
+        data={"sub": user_id, "sid": session_id, "jti": new_jti},
+        expires_at=refresh_session.expires_at,
+    )
+    await db.commit()
+
+    is_secure = settings.ENVIRONMENT == "production"
+    refresh_max_age = max(0, int((refresh_session.expires_at - now).total_seconds()))
 
     response.set_cookie(
         key="access_token",
@@ -127,14 +191,62 @@ async def refresh_token(
         httponly=True,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
+        secure=is_secure,
     )
 
-    return {"access_token": new_access_token, "token_type": "bearer"}
+    response.set_cookie(
+        key="refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        max_age=refresh_max_age,
+        samesite="lax",
+        secure=is_secure,
+    )
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+    }
 
 
 @router.post("/logout")
-async def logout(response: Response) -> dict[str, str]:
+async def logout(
+    response: Response,
+    db: db_dep,
+    refresh_token: str | None = Cookie(default=None),
+) -> dict[str, str]:
+    if refresh_token:
+        payload = decode_token(refresh_token)
+        if (
+            payload
+            and payload.get("type") == "refresh"
+            and payload.get("sub")
+            and payload.get("sid")
+            and payload.get("jti")
+        ):
+            try:
+                user_id = int(payload["sub"])
+                session_id = int(payload["sid"])
+            except (TypeError, ValueError):
+                pass
+            else:
+                stmt = (
+                    select(RefreshSession)
+                    .where(
+                        RefreshSession.id == session_id,
+                        RefreshSession.user_id == user_id,
+                        RefreshSession.current_jti == payload["jti"],
+                        RefreshSession.revoked_at.is_(None),
+                    )
+                    .with_for_update()
+                )
+                result = await db.execute(stmt)
+                refresh_session = result.scalar_one_or_none()
+                if refresh_session is not None:
+                    refresh_session.revoked_at = datetime.now(UTC)
+                    await db.commit()
+
     is_secure = settings.ENVIRONMENT == "production"
 
     response.delete_cookie(key="access_token", samesite="lax", secure=is_secure)
