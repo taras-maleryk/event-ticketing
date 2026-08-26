@@ -312,6 +312,7 @@ async def test_refresh_token_without_cookie_returns_401(
 
 async def test_logout_successfully(
     client: AsyncClient,
+    db_session: AsyncSession,
 ) -> None:
     register_payload = {
         "name": "Tom Norris",
@@ -340,6 +341,10 @@ async def test_logout_successfully(
     assert login_response.status_code == 200
     assert "access_token" in client.cookies
     assert "refresh_token" in client.cookies
+    refresh_token = login_response.json()["refresh_token"]
+    refresh_payload = decode_token(refresh_token)
+
+    assert refresh_payload is not None
 
     logout_response = await client.post("/api/auth/logout")
 
@@ -349,6 +354,17 @@ async def test_logout_successfully(
     assert logout_data["detail"] == "Successfully logged out"
     assert "access_token" not in client.cookies
     assert "refresh_token" not in client.cookies
+
+    refresh_session = await db_session.get(RefreshSession, int(refresh_payload["sid"]))
+
+    assert refresh_session is not None
+    assert refresh_session.revoked_at is not None
+
+    client.cookies.set("refresh_token", refresh_token)
+    replay_response = await client.post("/api/auth/refresh")
+
+    assert replay_response.status_code == 401
+    assert replay_response.json()["detail"] == "Invalid or expired refresh session"
 
 
 async def test_refresh_with_invalid_token_returns_401(

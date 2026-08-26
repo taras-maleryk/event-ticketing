@@ -211,7 +211,42 @@ async def refresh_token(
 
 
 @router.post("/logout")
-async def logout(response: Response) -> dict[str, str]:
+async def logout(
+    response: Response,
+    db: db_dep,
+    refresh_token: str | None = Cookie(default=None),
+) -> dict[str, str]:
+    if refresh_token:
+        payload = decode_token(refresh_token)
+        if (
+            payload
+            and payload.get("type") == "refresh"
+            and payload.get("sub")
+            and payload.get("sid")
+            and payload.get("jti")
+        ):
+            try:
+                user_id = int(payload["sub"])
+                session_id = int(payload["sid"])
+            except (TypeError, ValueError):
+                pass
+            else:
+                stmt = (
+                    select(RefreshSession)
+                    .where(
+                        RefreshSession.id == session_id,
+                        RefreshSession.user_id == user_id,
+                        RefreshSession.current_jti == payload["jti"],
+                        RefreshSession.revoked_at.is_(None),
+                    )
+                    .with_for_update()
+                )
+                result = await db.execute(stmt)
+                refresh_session = result.scalar_one_or_none()
+                if refresh_session is not None:
+                    refresh_session.revoked_at = datetime.now(UTC)
+                    await db.commit()
+
     is_secure = settings.ENVIRONMENT == "production"
 
     response.delete_cookie(key="access_token", samesite="lax", secure=is_secure)
