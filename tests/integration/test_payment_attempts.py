@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -6,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from stripe import Event, StripeError
 
 from app.enums.payment_attempt_status import PaymentAttemptStatus
@@ -614,6 +615,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
     booking = await db_session.scalar(select(Booking).where(Booking.seat_id == seat_id))
 
     assert booking is not None
+    assert saved_payment_attempt.booking_id == booking.id
     assert booking.user_id == user_id
     assert booking.price_paid == amount
 
@@ -667,3 +669,188 @@ async def test_completed_stripe_payment_flow_is_idempotent(
     )
 
     assert webhook_event_count == 1
+
+
+@pytest.mark.parametrize(
+    "initial_status",
+    [
+        PaymentAttemptStatus.EXPIRED,
+        PaymentAttemptStatus.FAILED,
+        PaymentAttemptStatus.REQUIRES_REFUND,
+    ],
+)
+async def test_completed_checkout_ignores_invalid_payment_status(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+    initial_status: PaymentAttemptStatus,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    seat_id = created_seats[0]["id"]
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        seat_id,
+    )
+    hold = await db_session.get(Hold, created_hold["id"])
+
+    assert hold is not None
+
+    payment_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=hold.id,
+        user_id=hold.user_id,
+    )
+    payment_attempt.status = initial_status
+
+    payment_attempt_id = payment_attempt.id
+    event_id = f"evt_completed_{initial_status.value}"
+    await db_session.commit()
+
+    checkout_session = FakeStripeCheckoutSession(
+        id=f"cs_completed_{initial_status.value}",
+        payment_status="paid",
+        amount_total=payment_attempt.amount,
+        currency=payment_attempt.currency,
+        metadata={
+            "payment_attempt_id": str(payment_attempt_id),
+        },
+    )
+    fake_event = FakeStripeEvent(
+        id=event_id,
+        type="checkout.session.completed",
+        data=FakeStripeEventData(object=checkout_session),
+    )
+
+    outcome = await process_stripe_event(
+        db_session,
+        event=cast(Event, fake_event),
+    )
+    await db_session.commit()
+    await db_session.refresh(payment_attempt)
+
+    assert outcome is None
+    assert payment_attempt.status == initial_status
+    assert payment_attempt.stripe_checkout_session_id is None
+    assert await db_session.get(Hold, hold.id) is not None
+
+    booking_count = await db_session.scalar(
+        select(func.count(Booking.id)).where(Booking.seat_id == seat_id)
+    )
+    webhook_event = await db_session.scalar(
+        select(StripeWebhookEvent).where(StripeWebhookEvent.stripe_event_id == event_id)
+    )
+
+    assert booking_count == 0
+    assert webhook_event is not None
+
+
+async def test_completed_and_expired_webhooks_are_serialized(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    seat_id = created_seats[0]["id"]
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        seat_id,
+    )
+    hold = await db_session.get(Hold, created_hold["id"])
+
+    assert hold is not None
+
+    payment_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=hold.id,
+        user_id=hold.user_id,
+    )
+    payment_attempt.status = PaymentAttemptStatus.PENDING
+    payment_attempt.stripe_checkout_session_id = "cs_concurrent_webhooks"
+
+    payment_attempt_id = payment_attempt.id
+    await db_session.commit()
+
+    checkout_session = FakeStripeCheckoutSession(
+        id="cs_concurrent_webhooks",
+        payment_status="paid",
+        amount_total=payment_attempt.amount,
+        currency=payment_attempt.currency,
+        metadata={
+            "payment_attempt_id": str(payment_attempt_id),
+        },
+    )
+    completed_event = cast(
+        Event,
+        FakeStripeEvent(
+            id="evt_concurrent_completed",
+            type="checkout.session.completed",
+            data=FakeStripeEventData(object=checkout_session),
+        ),
+    )
+    expired_event = cast(
+        Event,
+        FakeStripeEvent(
+            id="evt_concurrent_expired",
+            type="checkout.session.expired",
+            data=FakeStripeEventData(object=checkout_session),
+        ),
+    )
+
+    assert db_session.bind is not None
+    webhook_session_maker = async_sessionmaker(
+        bind=db_session.bind,
+        expire_on_commit=False,
+    )
+
+    async def process_event(event: Event) -> None:
+        async with webhook_session_maker() as webhook_session:
+            await process_stripe_event(
+                webhook_session,
+                event=event,
+            )
+            await webhook_session.commit()
+
+    await asyncio.gather(
+        process_event(completed_event),
+        process_event(expired_event),
+    )
+
+    await db_session.refresh(payment_attempt)
+
+    booking_count = await db_session.scalar(
+        select(func.count(Booking.id)).where(Booking.seat_id == seat_id)
+    )
+    webhook_event_count = await db_session.scalar(
+        select(func.count(StripeWebhookEvent.id)).where(
+            StripeWebhookEvent.stripe_event_id.in_(
+                [
+                    "evt_concurrent_completed",
+                    "evt_concurrent_expired",
+                ]
+            )
+        )
+    )
+
+    assert payment_attempt.status in {
+        PaymentAttemptStatus.SUCCEEDED,
+        PaymentAttemptStatus.EXPIRED,
+    }
+    assert booking_count == (
+        1 if payment_attempt.status == PaymentAttemptStatus.SUCCEEDED else 0
+    )
+    saved_hold_id = await db_session.scalar(select(Hold.id).where(Hold.id == hold.id))
+
+    assert saved_hold_id is None
+    assert webhook_event_count == 2
