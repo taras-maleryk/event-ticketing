@@ -217,6 +217,19 @@ async def process_completed_checkout(
             **log_context,
         )
         return None
+    if payment_attempt.status not in {
+        PaymentAttemptStatus.CREATING,
+        PaymentAttemptStatus.PENDING,
+    }:
+        logger.info(
+            "stripe_checkout_completion_ignored",
+            payment_attempt_id=payment_attempt.id,
+            payment_attempt_status=payment_attempt.status.value,
+            stripe_event_id=event.id,
+            stripe_checkout_session_id=checkout_session.id,
+            **log_context,
+        )
+        return None
 
     existing_session_id = payment_attempt.stripe_checkout_session_id
 
