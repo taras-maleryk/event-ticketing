@@ -6,8 +6,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, db_dep
+from app.enums.payment_attempt_status import PaymentAttemptStatus
 from app.models.booking import Booking
 from app.models.hold import Hold
+from app.models.payment_attempt import PaymentAttempt
 from app.models.seat import Seat
 from app.schemas.hold import HoldResponse
 
@@ -89,6 +91,26 @@ async def release_hold(db: db_dep, seat_id: int, current_user: CurrentUser) -> N
     if hold is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Hold not found"
+        )
+
+    active_payment_attempt_id = await db.scalar(
+        select(PaymentAttempt.id)
+        .where(
+            PaymentAttempt.hold_id == hold.id,
+            PaymentAttempt.status.in_(
+                [
+                    PaymentAttemptStatus.CREATING,
+                    PaymentAttemptStatus.PENDING,
+                ]
+            ),
+        )
+        .limit(1)
+    )
+
+    if active_payment_attempt_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Hold has an active payment",
         )
 
     await db.delete(hold)

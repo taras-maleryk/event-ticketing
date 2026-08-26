@@ -1,13 +1,16 @@
 from datetime import UTC, datetime
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.enums.payment_attempt_status import PaymentAttemptStatus
 from app.models.booking import Booking
 from app.models.hold import Hold
 from app.models.seat import Seat
 from app.models.user import User
+from app.services.payments import get_or_create_payment_attempt
 from tests.utils.holds import create_hold_for_seat
 from tests.utils.seats import create_event_with_seats
 
@@ -227,6 +230,56 @@ async def test_release_hold_successfully(
     hold = await db_session.scalar(select(Hold).where(Hold.id == created_hold["id"]))
 
     assert hold is None
+
+
+@pytest.mark.parametrize(
+    "payment_status",
+    [
+        PaymentAttemptStatus.CREATING,
+        PaymentAttemptStatus.PENDING,
+    ],
+)
+async def test_release_hold_with_active_payment_returns_409(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+    payment_status: PaymentAttemptStatus,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    seat_id = created_seats[0]["id"]
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        seat_id,
+    )
+
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert user is not None
+
+    payment_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=created_hold["id"],
+        user_id=user.id,
+    )
+    payment_attempt.status = payment_status
+    await db_session.commit()
+
+    response = await client.delete(
+        f"/api/seats/{seat_id}/hold",
+        headers=regular_user_headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Hold has an active payment"
+    assert await db_session.get(Hold, created_hold["id"]) is not None
 
 
 async def test_release_hold_when_user_has_no_hold_returns_404(
