@@ -614,6 +614,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
     booking = await db_session.scalar(select(Booking).where(Booking.seat_id == seat_id))
 
     assert booking is not None
+    assert saved_payment_attempt.booking_id == booking.id
     assert booking.user_id == user_id
     assert booking.price_paid == amount
 

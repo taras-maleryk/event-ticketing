@@ -279,6 +279,8 @@ async def process_completed_checkout(
     )
 
     db.add(booking)
+    await db.flush()
+    payment_attempt.booking_id = booking.id
 
     payment_attempt.status = PaymentAttemptStatus.SUCCEEDED
 
