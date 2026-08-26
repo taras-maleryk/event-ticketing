@@ -43,6 +43,72 @@ async def test_register_user_successfully(
     assert user.hashed_password != "StrongPass123"
 
 
+async def test_register_trims_user_name(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = {
+        "name": "  John Doe  ",
+        "email": "john@example.com",
+        "password": "StrongPass123",
+        "confirm_password": "StrongPass123",
+    }
+
+    response = await client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["name"] == "John Doe"
+
+    user = await db_session.scalar(select(User).where(User.email == "john@example.com"))
+
+    assert user is not None
+    assert user.name == "John Doe"
+
+
+async def test_register_rejects_blank_user_name(client: AsyncClient) -> None:
+    payload = {
+        "name": "   ",
+        "email": "john@example.com",
+        "password": "StrongPass123",
+        "confirm_password": "StrongPass123",
+    }
+
+    response = await client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+
+
+async def test_register_rejects_user_name_longer_than_database_limit(
+    client: AsyncClient,
+) -> None:
+    payload = {
+        "name": "a" * 101,
+        "email": "john@example.com",
+        "password": "StrongPass123",
+        "confirm_password": "StrongPass123",
+    }
+
+    response = await client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+
+
+async def test_register_rejects_password_longer_than_limit(
+    client: AsyncClient,
+) -> None:
+    password = "StrongPass123" + "a" * 116
+    payload = {
+        "name": "John Doe",
+        "email": "john@example.com",
+        "password": password,
+        "confirm_password": password,
+    }
+
+    response = await client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+
+
 async def test_register_duplicate_email(
     client: AsyncClient,
 ) -> None:
