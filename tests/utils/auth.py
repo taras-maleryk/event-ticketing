@@ -14,7 +14,7 @@ async def create_auth_headers_for_user(
     user = User(
         name=name,
         email=email,
-        hashed_password=get_password_hash("StrongPass123"),
+        hashed_password=await get_password_hash("StrongPass123"),
         role=role,
     )
 
