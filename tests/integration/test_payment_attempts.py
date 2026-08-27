@@ -13,6 +13,7 @@ from stripe import Event, StripeError
 from app.enums.payment_attempt_status import PaymentAttemptStatus
 from app.models import Seat, User
 from app.models.booking import Booking
+from app.models.event import Event as EventModel
 from app.models.hold import Hold
 from app.models.payment_attempt import PaymentAttempt
 from app.models.stripe_webhook_event import StripeWebhookEvent
@@ -262,6 +263,51 @@ async def test_payment_attempt_for_expired_hold_returns_409(
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "Hold has expired"
+
+
+async def test_payment_attempt_for_started_event_returns_409(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    created_event, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        created_seats[0]["id"],
+    )
+
+    event = await db_session.get(EventModel, created_event["id"])
+    user = await db_session.scalar(
+        select(User).where(User.email == "regular@example.com")
+    )
+
+    assert event is not None
+    assert user is not None
+
+    event.date = datetime.now(UTC) - timedelta(minutes=1)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_or_create_payment_attempt(
+            db_session,
+            hold_id=created_hold["id"],
+            user_id=user.id,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Event has already started"
+
+    payment_attempt = await db_session.scalar(
+        select(PaymentAttempt).where(PaymentAttempt.hold_id == created_hold["id"])
+    )
+
+    assert payment_attempt is None
 
 
 async def test_payment_attempt_for_booked_seat_returns_409(
