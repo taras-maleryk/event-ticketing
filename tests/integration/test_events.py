@@ -417,6 +417,34 @@ async def test_update_event_rejects_naive_datetime(
     assert response.status_code == 422
 
 
+async def test_update_event_rejects_past_date(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    created_event = await create_event_as_organizer(
+        client,
+        organizer_headers,
+    )
+
+    original_date = datetime.fromisoformat(created_event["date"])
+    past_date = datetime.now(UTC) - timedelta(minutes=1)
+
+    response = await client.patch(
+        f"/api/events/{created_event['id']}",
+        json={"date": past_date.isoformat()},
+        headers=organizer_headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Event date must be in the future"
+
+    event = await db_session.get(Event, created_event["id"])
+
+    assert event is not None
+    assert event.date == original_date
+
+
 async def test_update_missing_event_as_organizer_returns_404(
     client: AsyncClient,
     organizer_headers: dict[str, str],
