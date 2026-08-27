@@ -18,7 +18,7 @@ from app.core.security import (
 )
 from app.models.refresh_session import RefreshSession
 from app.models.user import User
-from app.schemas.token import Token
+from app.schemas.token import AuthResponse
 from app.schemas.user import UserCreate, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -50,7 +50,7 @@ async def register(user_in: UserCreate, db: db_dep) -> User:
     return new_user
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=AuthResponse)
 async def login(
     response: Response,
     db: db_dep,
@@ -113,14 +113,10 @@ async def login(
         secure=is_secure,
     )
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return {"detail": "Successfully logged in"}
 
 
-@router.post("/refresh", response_model=Token)
+@router.post("/refresh", response_model=AuthResponse)
 async def refresh_token(
     response: Response,
     db: db_dep,
@@ -206,11 +202,7 @@ async def refresh_token(
         secure=is_secure,
     )
 
-    return {
-        "access_token": new_access_token,
-        "refresh_token": new_refresh_token,
-        "token_type": "bearer",
-    }
+    return {"detail": "Tokens refreshed"}
 
 
 @router.post("/logout")
