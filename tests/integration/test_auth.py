@@ -177,14 +177,20 @@ async def test_login_user_successfully(
 
     login_data = login_response.json()
 
-    assert login_data["access_token"] is not None
-    assert login_data["refresh_token"] is not None
-    assert login_data["token_type"] == "bearer"
-
+    assert login_data == {"detail": "Successfully logged in"}
     assert "access_token" in login_response.cookies
     assert "refresh_token" in login_response.cookies
 
-    refresh_payload = decode_token(login_data["refresh_token"])
+    set_cookie_headers = login_response.headers.get_list("set-cookie")
+
+    assert len(set_cookie_headers) == 2
+    assert all("HttpOnly" in header for header in set_cookie_headers)
+
+    refresh_token = login_response.cookies.get("refresh_token")
+
+    assert refresh_token is not None
+
+    refresh_payload = decode_token(refresh_token)
 
     assert refresh_payload is not None
     assert refresh_payload["type"] == "refresh"
@@ -264,7 +270,9 @@ async def test_refresh_token_successfully(
 
     assert login_response.status_code == 200
     assert "refresh_token" in login_response.cookies
-    original_refresh_token = login_response.json()["refresh_token"]
+    original_refresh_token = login_response.cookies.get("refresh_token")
+
+    assert original_refresh_token is not None
     original_payload = decode_token(original_refresh_token)
 
     assert original_payload is not None
@@ -275,13 +283,16 @@ async def test_refresh_token_successfully(
 
     refresh_data = refresh_response.json()
 
-    assert refresh_data["access_token"] is not None
-    assert refresh_data["token_type"] == "bearer"
-    assert refresh_data["refresh_token"] != original_refresh_token
+    assert refresh_data == {"detail": "Tokens refreshed"}
     assert "access_token" in refresh_response.cookies
     assert "refresh_token" in refresh_response.cookies
 
-    rotated_payload = decode_token(refresh_data["refresh_token"])
+    rotated_refresh_token = refresh_response.cookies.get("refresh_token")
+
+    assert rotated_refresh_token is not None
+    assert rotated_refresh_token != original_refresh_token
+
+    rotated_payload = decode_token(rotated_refresh_token)
 
     assert rotated_payload is not None
     assert rotated_payload["sid"] == original_payload["sid"]
@@ -341,7 +352,10 @@ async def test_logout_successfully(
     assert login_response.status_code == 200
     assert "access_token" in client.cookies
     assert "refresh_token" in client.cookies
-    refresh_token = login_response.json()["refresh_token"]
+    refresh_token = login_response.cookies.get("refresh_token")
+
+    assert refresh_token is not None
+
     refresh_payload = decode_token(refresh_token)
 
     assert refresh_payload is not None

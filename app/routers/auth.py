@@ -18,7 +18,7 @@ from app.core.security import (
 )
 from app.models.refresh_session import RefreshSession
 from app.models.user import User
-from app.schemas.token import Token
+from app.schemas.token import AuthResponse
 from app.schemas.user import UserCreate, UserResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -36,7 +36,7 @@ async def register(user_in: UserCreate, db: db_dep) -> User:
             detail="User with this email already exists",
         )
 
-    hashed_pwd = get_password_hash(user_in.password)
+    hashed_pwd = await get_password_hash(user_in.password)
 
     user_data = user_in.model_dump(exclude={"password", "confirm_password"})
     user_data["hashed_password"] = hashed_pwd
@@ -50,7 +50,7 @@ async def register(user_in: UserCreate, db: db_dep) -> User:
     return new_user
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=AuthResponse)
 async def login(
     response: Response,
     db: db_dep,
@@ -63,7 +63,10 @@ async def login(
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user or not await verify_password(
+        form_data.password,
+        user.hashed_password,
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -110,14 +113,10 @@ async def login(
         secure=is_secure,
     )
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return {"detail": "Successfully logged in"}
 
 
-@router.post("/refresh", response_model=Token)
+@router.post("/refresh", response_model=AuthResponse)
 async def refresh_token(
     response: Response,
     db: db_dep,
@@ -203,11 +202,7 @@ async def refresh_token(
         secure=is_secure,
     )
 
-    return {
-        "access_token": new_access_token,
-        "refresh_token": new_refresh_token,
-        "token_type": "bearer",
-    }
+    return {"detail": "Tokens refreshed"}
 
 
 @router.post("/logout")
