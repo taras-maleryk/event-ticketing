@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.stripe_client import stripe_client
 from app.enums.payment_attempt_status import PaymentAttemptStatus
 from app.models.booking import Booking
+from app.models.event import Event
 from app.models.hold import Hold
 from app.models.payment_attempt import PaymentAttempt
 from app.models.seat import Seat
@@ -46,6 +47,28 @@ async def get_or_create_payment_attempt(
             detail="Hold has expired",
         )
 
+    seat = await db.get(Seat, hold.seat_id)
+
+    if seat is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Seat not found",
+        )
+
+    event_date = await db.scalar(select(Event.date).where(Event.id == seat.event_id))
+
+    if event_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found",
+        )
+
+    if event_date <= now:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Event has already started",
+        )
+
     booking_id = await db.scalar(
         select(Booking.id).where(Booking.seat_id == hold.seat_id)
     )
@@ -72,14 +95,6 @@ async def get_or_create_payment_attempt(
 
     if existing_attempt is not None:
         return existing_attempt
-
-    seat = await db.get(Seat, hold.seat_id)
-
-    if seat is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Seat not found",
-        )
 
     checkout_expires_at = now + timedelta(
         minutes=settings.STRIPE_CHECKOUT_EXPIRE_MINUTES

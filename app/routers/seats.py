@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.deps import CurrentUser, db_dep
 from app.enums.payment_attempt_status import PaymentAttemptStatus
 from app.models.booking import Booking
+from app.models.event import Event
 from app.models.hold import Hold
 from app.models.payment_attempt import PaymentAttempt
 from app.models.seat import Seat
@@ -26,6 +27,22 @@ async def hold_seat(db: db_dep, seat_id: int, current_user: CurrentUser) -> Hold
             status_code=status.HTTP_404_NOT_FOUND, detail="Seat not found"
         )
 
+    event_date = await db.scalar(select(Event.date).where(Event.id == seat.event_id))
+
+    if event_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event not found",
+        )
+
+    now = datetime.now(UTC)
+
+    if event_date <= now:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Event has already started",
+        )
+
     booking_id = await db.scalar(select(Booking.id).where(Booking.seat_id == seat_id))
 
     if booking_id is not None:
@@ -37,7 +54,7 @@ async def hold_seat(db: db_dep, seat_id: int, current_user: CurrentUser) -> Hold
     hold = Hold(
         user_id=current_user.id,
         seat_id=seat_id,
-        held_until=datetime.now(UTC) + timedelta(minutes=settings.HOLD_FOR_MINUTES),
+        held_until=now + timedelta(minutes=settings.HOLD_FOR_MINUTES),
     )
 
     db.add(hold)

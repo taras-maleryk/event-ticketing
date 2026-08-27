@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums.payment_attempt_status import PaymentAttemptStatus
 from app.models.booking import Booking
+from app.models.event import Event
 from app.models.hold import Hold
 from app.models.seat import Seat
 from app.models.user import User
@@ -88,6 +89,39 @@ async def test_hold_seat_successfully(
     assert hold.seat_id == seat_id
     assert hold.user_id == user.id
     assert hold.held_until > datetime.now(UTC)
+
+
+async def test_hold_seat_for_started_event_returns_409(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    created_event, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+
+    event = await db_session.get(Event, created_event["id"])
+
+    assert event is not None
+
+    event.date = datetime.now(UTC) - timedelta(minutes=1)
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/seats/{created_seats[0]['id']}/hold",
+        headers=regular_user_headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Event has already started"
+
+    hold = await db_session.scalar(
+        select(Hold).where(Hold.seat_id == created_seats[0]["id"])
+    )
+
+    assert hold is None
 
 
 async def test_hold_already_held_seat_returns_409(

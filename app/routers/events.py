@@ -193,6 +193,14 @@ async def update_event(
 
     updates = event_data.model_dump(exclude_unset=True)
 
+    updated_date = updates.get("date")
+
+    if isinstance(updated_date, datetime) and updated_date <= datetime.now(UTC):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Event date must be in the future",
+        )
+
     for field, value in updates.items():
         setattr(event, field, value)
 
