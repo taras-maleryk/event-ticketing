@@ -1,7 +1,7 @@
 # Event Ticketing API
 
 [![CI](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml/badge.svg)](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-106%20passed-brightgreen)](#tests-and-quality-checks)
+[![Tests](https://img.shields.io/badge/tests-113%20passed-brightgreen)](#tests-and-quality-checks)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -225,6 +225,7 @@ Docker templates are available in `.env.example` and `.env.docker.example`.
 | `HOLD_FOR_MINUTES` | Initial seat hold lifetime |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-session lifetime |
+| `CORS_ALLOWED_ORIGINS` | JSON array of frontend origins allowed to send credentialed requests |
 | `LOG_FORMAT` | `console` for development or `json` for structured logs |
 
 Never commit real secrets. The checked-in environment files contain placeholders
@@ -321,7 +322,7 @@ state transitions, token rotation, and refresh-token replay protection.
 Current verified result:
 
 ```text
-106 passed
+113 passed
 ```
 
 CI also applies the full schema from scratch before running the test suite.
