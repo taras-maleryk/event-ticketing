@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     HOLD_FOR_MINUTES: int = 15
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    CORS_ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
     ENVIRONMENT: str = "development"
     DB_ECHO: bool = True
 
