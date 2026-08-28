@@ -60,5 +60,20 @@ services:
         condition: service_healthy
     command: celery -A app.core.celery_app.celery_app worker --loglevel=info
 
+  beat:
+    build: .
+    env_file:
+      - .env.docker
+    volumes:
+      - .:/app
+    depends_on:
+      alembic:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    command: >-
+      celery -A app.core.celery_app.celery_app beat --loglevel=info
+      --schedule=/tmp/celerybeat-schedule
+
 volumes:
   postgres_data:

@@ -136,7 +136,7 @@ curl http://localhost:8000/
 ```
 
 Compose starts PostgreSQL, Redis, applies Alembic migrations, and then starts the
-API and Celery worker.
+API, Celery worker, and Celery Beat scheduler.
 
 | Service | Address |
 | --- | --- |
@@ -165,13 +165,8 @@ stripe listen --forward-to localhost:8000/api/webhooks/stripe
 Copy the webhook signing secret printed by Stripe CLI to
 `STRIPE_WEBHOOK_SECRET`, then restart the API.
 
-The hold-cleanup task is configured for Celery Beat. Until the scheduler is run
-as a permanent Compose service, it can be started in a separate terminal:
-
-```bash
-docker compose run --rm worker \
-  celery -A app.core.celery_app.celery_app beat --loglevel=info
-```
+Celery Beat schedules the daily cleanup of old holds automatically as part of
+the Compose stack.
 
 ## Local development
 
@@ -200,10 +195,12 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Start Redis and a Celery worker when working with background tasks:
+Start Redis, a Celery worker, and Celery Beat when working locally with
+background tasks:
 
 ```bash
 celery -A app.core.celery_app.celery_app worker --loglevel=info
+celery -A app.core.celery_app.celery_app beat --loglevel=info
 ```
 
 ## Configuration
