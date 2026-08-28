@@ -1,7 +1,7 @@
 # Event Ticketing API
 
 [![CI](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml/badge.svg)](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-113%20passed-brightgreen)](#tests-and-quality-checks)
+[![Tests](https://img.shields.io/badge/tests-115%20passed-brightgreen)](#tests-and-quality-checks)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -136,7 +136,7 @@ curl http://localhost:8000/
 ```
 
 Compose starts PostgreSQL, Redis, applies Alembic migrations, and then starts the
-API and Celery worker.
+API, Celery worker, and Celery Beat scheduler.
 
 | Service | Address |
 | --- | --- |
@@ -165,13 +165,8 @@ stripe listen --forward-to localhost:8000/api/webhooks/stripe
 Copy the webhook signing secret printed by Stripe CLI to
 `STRIPE_WEBHOOK_SECRET`, then restart the API.
 
-The hold-cleanup task is configured for Celery Beat. Until the scheduler is run
-as a permanent Compose service, it can be started in a separate terminal:
-
-```bash
-docker compose run --rm worker \
-  celery -A app.core.celery_app.celery_app beat --loglevel=info
-```
+Celery Beat schedules the daily cleanup of old holds automatically as part of
+the Compose stack.
 
 ## Local development
 
@@ -200,10 +195,12 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Start Redis and a Celery worker when working with background tasks:
+Start Redis, a Celery worker, and Celery Beat when working locally with
+background tasks:
 
 ```bash
 celery -A app.core.celery_app.celery_app worker --loglevel=info
+celery -A app.core.celery_app.celery_app beat --loglevel=info
 ```
 
 ## Configuration
@@ -322,7 +319,7 @@ state transitions, token rotation, and refresh-token replay protection.
 Current verified result:
 
 ```text
-113 passed
+115 passed
 ```
 
 CI also applies the full schema from scratch before running the test suite.
