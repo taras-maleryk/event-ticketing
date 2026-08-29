@@ -49,8 +49,17 @@ def downgrade() -> None:
         sa.Column(
             "status",
             sa.String(length=50),
-            nullable=False,
+            nullable=True,
         ),
+    )
+
+    op.execute(sa.text("UPDATE holds SET status = 'active' WHERE status IS NULL"))
+
+    op.alter_column(
+        "holds",
+        "status",
+        existing_type=sa.String(length=50),
+        nullable=False,
     )
 
     op.add_column(
