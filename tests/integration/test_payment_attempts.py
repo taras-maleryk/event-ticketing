@@ -577,6 +577,7 @@ async def test_user_can_get_payment_status(
     assert response_data["status"] == "creating"
     assert response_data["amount"] == payment_attempt.amount
     assert response_data["currency"] == "uah"
+    assert response_data["booking_id"] is None
 
 
 async def test_completed_stripe_payment_flow_is_idempotent(
@@ -694,6 +695,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
     assert status_data["status"] == "succeeded"
     assert status_data["amount"] == amount
     assert status_data["currency"] == currency
+    assert status_data["booking_id"] == booking.id
 
     await process_stripe_event(
         db_session,
