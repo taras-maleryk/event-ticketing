@@ -7,6 +7,7 @@ from app.middleware.request_logging import (
     RequestLoggingMiddleware,
 )
 from app.routers.auth import router as auth_router
+from app.routers.bookings import router as bookings_router
 from app.routers.events import router as events_router
 from app.routers.payments import router as payments_router
 from app.routers.seats import router as seats_router
@@ -35,6 +36,7 @@ async def root() -> dict[str, str]:
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
+api_router.include_router(bookings_router)
 api_router.include_router(webhooks_router)
 api_router.include_router(events_router)
 api_router.include_router(payments_router)

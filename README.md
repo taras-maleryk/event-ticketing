@@ -1,7 +1,7 @@
 # Event Ticketing API
 
 [![CI](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml/badge.svg)](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-115%20passed-brightgreen)](#tests-and-quality-checks)
+[![Tests](https://img.shields.io/badge/tests-119%20passed-brightgreen)](#tests-and-quality-checks)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -25,6 +25,7 @@ concurrency scenarios.
 - Stripe Checkout with stable idempotency keys and persisted payment attempts.
 - Signed, deduplicated Stripe webhooks with explicit payment state transitions.
 - Transactional booking creation using row locks and database uniqueness rules.
+- Owner-only booking retrieval with seat, event, and ticket details.
 - JWT access and refresh tokens delivered through HttpOnly cookies.
 - Database-backed refresh sessions with token rotation, replay protection, and
   logout revocation.
@@ -248,6 +249,7 @@ All application endpoints are under `/api`.
 | `DELETE` | `/seats/{seat_id}/hold` | User | Release a hold without an active payment |
 | `POST` | `/holds/{hold_id}/checkout-session` | User | Start or reuse Stripe Checkout |
 | `GET` | `/payments/{payment_attempt_id}` | Owner user | Read payment status |
+| `GET` | `/bookings/{booking_id}` | Owner user | Retrieve booking and ticket details |
 | `POST` | `/webhooks/stripe` | Stripe signature | Process Stripe events |
 
 Public registration intentionally creates only regular users. Organizer accounts
@@ -295,6 +297,17 @@ curl -b cookies.txt -X POST \
 
 The response contains a Stripe-hosted Checkout URL and its expiration time.
 
+After Stripe confirms the payment, read its status and retrieve the completed
+booking:
+
+```bash
+curl -b cookies.txt http://localhost:8000/api/payments/1
+curl -b cookies.txt http://localhost:8000/api/bookings/1
+```
+
+The payment status exposes the resulting `booking_id`. Only its owner can read
+the booking and its ticket token.
+
 ## Tests and quality checks
 
 The test suite uses a dedicated PostgreSQL database because row locks, exclusion
@@ -319,7 +332,7 @@ state transitions, token rotation, and refresh-token replay protection.
 Current verified result:
 
 ```text
-115 passed
+119 passed
 ```
 
 CI also applies the full schema from scratch before running the test suite.

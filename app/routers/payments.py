@@ -117,6 +117,7 @@ async def get_payment_status(
     return PaymentStatusResponse(
         payment_attempt_id=payment_attempt.id,
         status=payment_attempt.status,
+        booking_id=payment_attempt.booking_id,
         amount=payment_attempt.amount,
         currency=payment_attempt.currency,
         checkout_expires_at=(payment_attempt.checkout_expires_at),
