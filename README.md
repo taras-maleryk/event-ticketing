@@ -1,7 +1,7 @@
 # Event Ticketing API
 
 [![CI](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml/badge.svg)](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-119%20passed-brightgreen)](#tests-and-quality-checks)
+[![Tests](https://img.shields.io/badge/tests-125%20passed-brightgreen)](#tests-and-quality-checks)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -24,6 +24,7 @@ concurrency scenarios.
 - Time-limited seat holds protected by a PostgreSQL exclusion constraint.
 - Stripe Checkout with stable idempotency keys and persisted payment attempts.
 - Signed, deduplicated Stripe webhooks with explicit payment state transitions.
+- Automatic, idempotent refunds for paid checkout conflicts.
 - Transactional booking creation using row locks and database uniqueness rules.
 - Owner-only booking retrieval with seat, event, and ticket details.
 - JWT access and refresh tokens delivered through HttpOnly cookies.
@@ -46,6 +47,7 @@ flowchart LR
     Stripe --> Webhook[Signed webhook endpoint]
     Webhook --> Reservation
     Worker[Celery worker] --> PostgreSQL
+    Worker --> Stripe
     Redis[(Redis)] --> Worker
 ```
 
@@ -59,7 +61,9 @@ flowchart LR
 5. Stripe receives a deterministic idempotency key based on the payment attempt.
 6. The signed webhook locks the payment attempt, verifies its state, amount,
    currency, and Checkout Session, then creates the booking transactionally.
-7. Duplicate or out-of-order webhook events are safely ignored.
+7. If another booking already owns the seat, the payment is marked for refund;
+   Celery then creates or reconciles the full Stripe refund idempotently.
+8. Duplicate or out-of-order webhook events are safely ignored.
 
 ### Seat-hold transaction
 
@@ -166,8 +170,8 @@ stripe listen --forward-to localhost:8000/api/webhooks/stripe
 Copy the webhook signing secret printed by Stripe CLI to
 `STRIPE_WEBHOOK_SECRET`, then restart the API.
 
-Celery Beat schedules the daily cleanup of old holds automatically as part of
-the Compose stack.
+Celery Beat schedules both the daily cleanup of old holds and the retryable
+processing of required Stripe refunds as part of the Compose stack.
 
 ## Local development
 
@@ -332,7 +336,7 @@ state transitions, token rotation, and refresh-token replay protection.
 Current verified result:
 
 ```text
-119 passed
+125 passed
 ```
 
 CI also applies the full schema from scratch before running the test suite.
