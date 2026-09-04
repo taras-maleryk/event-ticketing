@@ -85,6 +85,20 @@ def get_checkout_log_context(
     }
 
 
+def get_payment_intent_id(
+    checkout_session: StripeCheckoutSession,
+) -> str:
+    payment_intent = checkout_session.payment_intent
+
+    if isinstance(payment_intent, str):
+        return payment_intent
+
+    if payment_intent is not None and payment_intent.id:
+        return payment_intent.id
+
+    raise RuntimeError("Stripe Checkout Session has no payment_intent")
+
+
 async def register_stripe_event(
     db: AsyncSession,
     *,
@@ -238,6 +252,17 @@ async def process_completed_checkout(
 
     payment_attempt.stripe_checkout_session_id = checkout_session.id
 
+    payment_intent_id = get_payment_intent_id(checkout_session)
+    existing_payment_intent_id = payment_attempt.stripe_payment_intent_id
+
+    if (
+        existing_payment_intent_id is not None
+        and existing_payment_intent_id != payment_intent_id
+    ):
+        raise RuntimeError("Stripe PaymentIntent does not match the payment attempt")
+
+    payment_attempt.stripe_payment_intent_id = payment_intent_id
+
     if checkout_session.amount_total is None:
         raise RuntimeError("Stripe Checkout Session has no amount_total")
 
@@ -357,6 +382,7 @@ async def process_expired_checkout(
     if payment_attempt.status in {
         PaymentAttemptStatus.SUCCEEDED,
         PaymentAttemptStatus.REQUIRES_REFUND,
+        PaymentAttemptStatus.REFUNDED,
     }:
         logger.info(
             "stripe_checkout_expiration_ignored",

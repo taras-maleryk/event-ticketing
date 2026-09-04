@@ -32,6 +32,7 @@ class FakeStripeCheckoutSession:
     amount_total: int | None = None
     currency: str | None = None
     metadata: dict[str, str] | None = None
+    payment_intent: str | None = None
 
 
 @dataclass
@@ -629,6 +630,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
         payment_status="paid",
         amount_total=amount,
         currency=currency,
+        payment_intent="pi_test_completed_flow",
         metadata={
             "payment_attempt_id": str(payment_attempt_id),
         },
@@ -658,6 +660,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
 
     assert saved_payment_attempt is not None
     assert saved_payment_attempt.status == PaymentAttemptStatus.SUCCEEDED
+    assert saved_payment_attempt.stripe_payment_intent_id == "pi_test_completed_flow"
 
     booking = await db_session.scalar(select(Booking).where(Booking.seat_id == seat_id))
 
@@ -725,6 +728,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
         PaymentAttemptStatus.EXPIRED,
         PaymentAttemptStatus.FAILED,
         PaymentAttemptStatus.REQUIRES_REFUND,
+        PaymentAttemptStatus.REFUNDED,
     ],
 )
 async def test_completed_checkout_ignores_invalid_payment_status(
@@ -765,6 +769,7 @@ async def test_completed_checkout_ignores_invalid_payment_status(
         payment_status="paid",
         amount_total=payment_attempt.amount,
         currency=payment_attempt.currency,
+        payment_intent=f"pi_completed_{initial_status.value}",
         metadata={
             "payment_attempt_id": str(payment_attempt_id),
         },
@@ -835,6 +840,7 @@ async def test_completed_and_expired_webhooks_are_serialized(
         payment_status="paid",
         amount_total=payment_attempt.amount,
         currency=payment_attempt.currency,
+        payment_intent="pi_concurrent_webhooks",
         metadata={
             "payment_attempt_id": str(payment_attempt_id),
         },

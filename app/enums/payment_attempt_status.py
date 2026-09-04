@@ -8,3 +8,4 @@ class PaymentAttemptStatus(StrEnum):
     FAILED = "failed"
     EXPIRED = "expired"
     REQUIRES_REFUND = "requires_refund"
+    REFUNDED = "refunded"
