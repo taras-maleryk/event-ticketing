@@ -32,6 +32,7 @@ class FakeStripeCheckoutSession:
     amount_total: int | None = None
     currency: str | None = None
     metadata: dict[str, str] | None = None
+    payment_intent: str | None = None
 
 
 @dataclass
@@ -580,6 +581,83 @@ async def test_user_can_get_payment_status(
     assert response_data["booking_id"] is None
 
 
+async def test_paid_checkout_for_booked_seat_requires_refund(
+    client: AsyncClient,
+    organizer_headers: dict[str, str],
+    regular_user_headers: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    _, created_seats = await create_event_with_seats(
+        client,
+        organizer_headers,
+    )
+    seat_id = created_seats[0]["id"]
+    created_hold = await create_hold_for_seat(
+        client,
+        regular_user_headers,
+        seat_id,
+    )
+    hold = await db_session.get(Hold, created_hold["id"])
+
+    assert hold is not None
+
+    payment_attempt = await get_or_create_payment_attempt(
+        db_session,
+        hold_id=hold.id,
+        user_id=hold.user_id,
+    )
+    payment_attempt.stripe_checkout_session_id = "cs_conflicting_payment"
+    payment_attempt.status = PaymentAttemptStatus.PENDING
+    existing_booking = Booking(
+        seat_id=seat_id,
+        user_id=hold.user_id,
+        price_paid=payment_attempt.amount,
+        ticket_token="existing-booking",
+    )
+    db_session.add(existing_booking)
+    await db_session.commit()
+
+    checkout_session = FakeStripeCheckoutSession(
+        id="cs_conflicting_payment",
+        payment_status="paid",
+        amount_total=payment_attempt.amount,
+        currency=payment_attempt.currency,
+        payment_intent="pi_conflicting_payment",
+        metadata={
+            "payment_attempt_id": str(payment_attempt.id),
+        },
+    )
+    fake_event = FakeStripeEvent(
+        id="evt_conflicting_payment",
+        type="checkout.session.completed",
+        data=FakeStripeEventData(
+            object=checkout_session,
+        ),
+    )
+
+    outcome = await process_stripe_event(
+        db_session,
+        event=cast(Event, fake_event),
+    )
+    await db_session.commit()
+    await db_session.refresh(payment_attempt)
+
+    assert outcome is not None
+    assert outcome.event_name == "payment_requires_refund"
+    assert outcome.level == "warning"
+    assert payment_attempt.status == PaymentAttemptStatus.REQUIRES_REFUND
+    assert payment_attempt.stripe_payment_intent_id == "pi_conflicting_payment"
+    assert payment_attempt.stripe_refund_id is None
+    assert payment_attempt.booking_id is None
+
+    saved_bookings = (
+        await db_session.scalars(select(Booking).where(Booking.seat_id == seat_id))
+    ).all()
+
+    assert len(saved_bookings) == 1
+    assert saved_bookings[0].id == existing_booking.id
+
+
 async def test_completed_stripe_payment_flow_is_idempotent(
     client: AsyncClient,
     organizer_headers: dict[str, str],
@@ -629,6 +707,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
         payment_status="paid",
         amount_total=amount,
         currency=currency,
+        payment_intent="pi_test_completed_flow",
         metadata={
             "payment_attempt_id": str(payment_attempt_id),
         },
@@ -658,6 +737,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
 
     assert saved_payment_attempt is not None
     assert saved_payment_attempt.status == PaymentAttemptStatus.SUCCEEDED
+    assert saved_payment_attempt.stripe_payment_intent_id == "pi_test_completed_flow"
 
     booking = await db_session.scalar(select(Booking).where(Booking.seat_id == seat_id))
 
@@ -725,6 +805,7 @@ async def test_completed_stripe_payment_flow_is_idempotent(
         PaymentAttemptStatus.EXPIRED,
         PaymentAttemptStatus.FAILED,
         PaymentAttemptStatus.REQUIRES_REFUND,
+        PaymentAttemptStatus.REFUNDED,
     ],
 )
 async def test_completed_checkout_ignores_invalid_payment_status(
@@ -765,6 +846,7 @@ async def test_completed_checkout_ignores_invalid_payment_status(
         payment_status="paid",
         amount_total=payment_attempt.amount,
         currency=payment_attempt.currency,
+        payment_intent=f"pi_completed_{initial_status.value}",
         metadata={
             "payment_attempt_id": str(payment_attempt_id),
         },
@@ -835,6 +917,7 @@ async def test_completed_and_expired_webhooks_are_serialized(
         payment_status="paid",
         amount_total=payment_attempt.amount,
         currency=payment_attempt.currency,
+        payment_intent="pi_concurrent_webhooks",
         metadata={
             "payment_attempt_id": str(payment_attempt_id),
         },

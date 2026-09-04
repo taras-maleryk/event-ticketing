@@ -45,6 +45,10 @@ class PaymentAttempt(Base):
             "stripe_payment_intent_id",
             name="uq_payment_attempts_payment_intent_id",
         ),
+        UniqueConstraint(
+            "stripe_refund_id",
+            name="uq_payment_attempts_refund_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -96,6 +100,11 @@ class PaymentAttempt(Base):
     )
 
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    stripe_refund_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
