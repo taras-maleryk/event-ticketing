@@ -17,7 +17,7 @@ def configure_celery_logging(**_: object) -> None:
 celery_app = Celery(
     "event_ticketing",
     broker=settings.REDIS_URL,
-    include=["app.tasks.holds"],
+    include=["app.tasks.holds", "app.tasks.refunds"],
 )
 
 celery_app.conf.update(
@@ -33,5 +33,9 @@ celery_app.conf.beat_schedule = {
     "cleanup-old-holds-daily": {
         "task": "app.tasks.holds.cleanup_old_holds",
         "schedule": crontab(hour=3, minute=0),
+    },
+    "process-required-refunds": {
+        "task": "app.tasks.refunds.process_required_refunds",
+        "schedule": crontab(),
     },
 }
