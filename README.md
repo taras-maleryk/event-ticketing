@@ -1,7 +1,7 @@
 # Event Ticketing API
 
 [![CI](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml/badge.svg)](https://github.com/taras-maleryk/event-ticketing/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-125%20passed-brightgreen)](#tests-and-quality-checks)
+[![Tests](https://img.shields.io/badge/tests-130%20passed-brightgreen)](#tests-and-quality-checks)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -347,7 +347,7 @@ state transitions, token rotation, and refresh-token replay protection.
 Current verified result:
 
 ```text
-125 passed
+130 passed
 ```
 
 CI also applies the full schema from scratch before running the test suite.
