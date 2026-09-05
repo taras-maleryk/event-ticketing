@@ -257,8 +257,19 @@ All application endpoints are under `/api`.
 | `POST` | `/webhooks/stripe` | Stripe signature | Process Stripe events |
 
 Public registration intentionally creates only regular users. Organizer accounts
-are provisioned separately; for a local demo, register an account and assign the
-`organizer` role directly in the development database.
+are provisioned through the administrative CLI after applying database migrations:
+
+```bash
+python -m app.cli create-organizer +  --name "Demo Organizer" +  --email organizer@example.com
+```
+
+The command prompts for the password twice without echoing it to the terminal and
+applies the same name, email, and password validation as public registration.
+Inside the Docker Compose stack, run the equivalent command in the API container:
+
+```bash
+docker compose exec api python -m app.cli create-organizer +  --name "Demo Organizer" +  --email organizer@example.com
+```
 
 ## Example seat hold
 
