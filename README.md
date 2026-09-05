@@ -371,5 +371,5 @@ tests/             # unit, integration, and concurrency tests
 
 **Taras Maleryk**
 
-- LinkedIn: [linkedin.com/in/taras-maleryk-626365431](https://www.linkedin.com/in/taras-maleryk-626365431/)
+- LinkedIn: [Taras Maleryk](https://www.linkedin.com/in/taras-maleryk-626365431/)
 - GitHub: [@taras-maleryk](https://github.com/taras-maleryk)
