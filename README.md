@@ -7,33 +7,21 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An asynchronous backend for event discovery, seat reservation, and Stripe-powered
-ticket checkout. The project focuses on the difficult parts of ticketing systems:
-concurrent seat holds, idempotent payment creation, out-of-order webhooks, and
-transactional consistency.
-
-The API is built with FastAPI, SQLAlchemy 2.0, PostgreSQL, Stripe, Celery, and
-Redis. It includes database migrations, structured request and payment logging,
-role-based access control, and an integration test suite with real PostgreSQL
-concurrency scenarios.
+An asynchronous FastAPI backend for event discovery, concurrent seat reservations,
+and Stripe-powered checkout. Built with SQLAlchemy 2.0, PostgreSQL, Celery, and
+Redis, it focuses on transactional consistency, idempotent payments, robust
+webhook handling, and secure cookie-based authentication.
 
 ## Highlights
 
-- Event catalogue with pagination, date filters, and upcoming/past views.
-- Organizer-managed events and configurable seat layouts with row-level pricing.
-- Per-user seat availability: available, held, held by me, booked, or booked by me.
-- Time-limited seat holds protected by a PostgreSQL exclusion constraint.
-- Stripe Checkout with stable idempotency keys and persisted payment attempts.
-- Signed, deduplicated Stripe webhooks with explicit payment state transitions.
-- Automatic, idempotent refunds for paid checkout conflicts.
-- Transactional booking creation using row locks and database uniqueness rules.
-- Owner-only booking retrieval with seat, event, and ticket details.
-- JWT access and refresh tokens delivered through HttpOnly cookies.
-- Database-backed refresh sessions with token rotation, replay protection, and
-  logout revocation.
-- Argon2 password hashing and role-based authorization.
-- Structured console or JSON logs with request and correlation IDs.
-- Unit, integration, and concurrency tests executed in GitHub Actions.
+- Searchable event catalogue and organizer-managed seat layouts with row pricing.
+- Per-user seat availability and time-limited holds enforced by PostgreSQL.
+- Idempotent Stripe Checkout and signed, deduplicated webhooks.
+- Transactional bookings and automatic refunds for paid checkout conflicts.
+- HttpOnly JWT cookies with rotating, revocable database-backed refresh sessions.
+- Owner-only booking access, role-based authorization, and Argon2 passwords.
+- Celery background processing and structured request/payment logging.
+- 130 unit, integration, and concurrency tests executed in GitHub Actions.
 
 ## System overview
 
@@ -56,39 +44,13 @@ flowchart LR
 
 1. An organizer creates an event and generates its seat layout.
 2. An authenticated user places a time-limited hold on an available seat.
-3. PostgreSQL rejects overlapping holds even when requests arrive concurrently.
-4. Checkout creates or reuses one active payment attempt and extends the hold to
-   cover the Stripe Checkout lifetime.
-5. Stripe receives a deterministic idempotency key based on the payment attempt.
-6. The signed webhook locks the payment attempt, verifies its state, amount,
-   currency, and Checkout Session, then creates the booking transactionally.
-7. If another booking already owns the seat, the payment is marked for refund;
-   Celery then creates or reconciles the full Stripe refund idempotently.
-8. Duplicate or out-of-order webhook events are safely ignored.
-
-### Seat-hold transaction
-
-```text
-BEGIN
-  -> verify that the seat has not already been booked
-  -> insert a time-bounded hold
-  -> let PostgreSQL reject an overlapping hold interval
-  -> verify booking state again before commit
-COMMIT
-```
-
-The database, rather than request timing in Python, is the final authority on
-whether concurrent users can hold the same seat.
-
-Additional rules keep the reservation lifecycle consistent:
-
-- `held_until` determines whether a hold is active;
-- a booked seat cannot be held again;
-- an existing active payment attempt is reused instead of duplicated;
-- checkout extends the hold so it cannot expire while Stripe is still accepting
-  payment;
-- webhook amount and currency must match the stored payment snapshot before a
-  booking is created.
+3. PostgreSQL rejects overlapping holds, including concurrent requests.
+4. Checkout creates or reuses a payment attempt, extends the hold, and uses a
+   deterministic Stripe idempotency key.
+5. The signed webhook locks and validates the payment attempt before creating
+   the booking transactionally.
+6. Duplicate or out-of-order events are ignored; paid booking conflicts are
+   refunded idempotently by Celery.
 
 ## Technology stack
 
@@ -261,7 +223,9 @@ Public registration intentionally creates only regular users. Organizer accounts
 are provisioned through the administrative CLI after applying database migrations:
 
 ```bash
-python -m app.cli create-organizer +  --name "Demo Organizer" +  --email organizer@example.com
+python -m app.cli create-organizer \
+  --name "Demo Organizer" \
+  --email organizer@example.com
 ```
 
 The command prompts for the password twice without echoing it to the terminal and
@@ -269,7 +233,9 @@ applies the same name, email, and password validation as public registration.
 Inside the Docker Compose stack, run the equivalent command in the API container:
 
 ```bash
-docker compose exec api python -m app.cli create-organizer +  --name "Demo Organizer" +  --email organizer@example.com
+docker compose exec api python -m app.cli create-organizer \
+  --name "Demo Organizer" \
+  --email organizer@example.com
 ```
 
 ## Example seat hold
@@ -405,4 +371,5 @@ tests/             # unit, integration, and concurrency tests
 
 **Taras Maleryk**
 
+- LinkedIn: [linkedin.com/in/taras-maleryk-626365431](https://www.linkedin.com/in/taras-maleryk-626365431/)
 - GitHub: [@taras-maleryk](https://github.com/taras-maleryk)
